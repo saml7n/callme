@@ -73,6 +73,7 @@ CallMe is an AI-powered phone receptionist. The architecture is documented in `d
 ### D) QA verify
 - Execute the QA verification steps listed in the story.
 - For Playwright QA: write a test file under `web/tests/e2e/` and run it.
+- **Note:** Vite must be started with `--host 0.0.0.0` for Playwright to reach it (default IPv6-only binding is not reachable). Use `npx vite --host 0.0.0.0` or set `server.host: true` in `vite.config.ts`.
 - For phone call QA: document the test (what you said, what the AI said, timestamps) in the commit or story doc.
 - For API QA: run the documented `curl`/`httpx` commands and record the results.
 
