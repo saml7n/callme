@@ -77,18 +77,18 @@ As a **project lead**, I want **clear decisions on accounts, tools, and constrai
 As a **developer**, I want **a working project skeleton with linting, testing, and dev scripts configured**, so that **every subsequent story starts from a runnable baseline, not a blank folder**.
 
 ### Acceptance criteria
-- [ ] `server/` directory exists with:
+- [x] `server/` directory exists with:
   - `pyproject.toml` (or `requirements.txt`) listing core dependencies: `fastapi`, `uvicorn`, `websockets`, `httpx`, `pydantic`, `pydantic-settings`, `sqlmodel`, `pytest`, `pytest-asyncio`.
   - `app/main.py` — a FastAPI app that starts and serves a health-check endpoint (`GET /health` → `{"status": "ok"}`).
   - `app/config.py` — reads all env vars via `pydantic-settings` (`BaseSettings`).
   - `tests/` directory with a passing smoke test for the health endpoint.
-- [ ] `web/` directory exists with:
+- [x] `web/` directory exists with:
   - Vite + React + TypeScript + Tailwind scaffolded (e.g. via `npm create vite@latest`).
   - A placeholder `App.tsx` that renders "CallMe — AI Receptionist".
   - Dev server starts with `npm run dev`.
-- [ ] `.env.example` at repo root lists all anticipated env vars (from Story 0).
-- [ ] `.gitignore` covers Python (`__pycache__`, `.venv`, etc.) and Node (`node_modules`, `dist`, etc.).
-- [ ] `README.md` at repo root has setup instructions for both `server/` and `web/`.
+- [x] `.env.example` at repo root lists all anticipated env vars (from Story 0).
+- [x] `.gitignore` covers Python (`__pycache__`, `.venv`, etc.) and Node (`node_modules`, `dist`, etc.).
+- [x] `README.md` at repo root has setup instructions for both `server/` and `web/`.
 
 ### Unit tests
 - `pytest server/tests/` passes — health endpoint returns 200 with `{"status": "ok"}`.
