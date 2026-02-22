@@ -40,6 +40,7 @@ class ActionResult:
     message: str  # text to speak before performing the action
     call_ended: bool = False  # True for end_call
     transfer_number: str = ""  # phone number for transfer
+    integration_result: dict[str, Any] | None = None  # result from an integration action
 
 
 @dataclass
@@ -621,6 +622,9 @@ class WorkflowEngine:
         Action nodes perform side effects:
         - ``end_call``: returns a closing message with call_ended=True.
         - ``transfer``: returns an announcement with the target phone number.
+        - ``integration``: returns the hold message; the integration is executed
+          asynchronously via ``_execute_integration_action`` after the hold
+          message is spoken.
         - Unknown action types raise WorkflowError.
         """
         action_data = self._current_node.get_action_data()
@@ -643,11 +647,130 @@ class WorkflowEngine:
                 call_ended=False,
                 transfer_number=action_data.target_number,
             )
+        elif action_data.action_type == ActionType.integration:
+            return ActionResult(
+                action_type="integration",
+                message=action_data.integration_message,
+                call_ended=False,
+                integration_result=None,  # filled in by run_integration
+            )
         else:
             raise WorkflowError(
                 f"Unknown action_type '{action_data.action_type}' "
                 f"in action node '{self._current_node.id}'"
             )
+
+    async def run_integration(self, db_session: Any = None) -> ActionResult:
+        """Execute the integration action for the current action node.
+
+        This is called by the pipeline *after* the hold message has been
+        spoken, so the caller doesn't experience silence.  The result is
+        injected into the conversation as a system note and the engine
+        auto-transitions to the next node.
+
+        Parameters
+        ----------
+        db_session : sqlmodel.Session, optional
+            Active DB session to load the Integration record.  The caller
+            (pipeline) is expected to supply this.
+        """
+        action_data = self._current_node.get_action_data()
+        if action_data.action_type != ActionType.integration:
+            raise WorkflowError("run_integration called on non-integration action node")
+
+        integration_id = action_data.integration_id
+        integration_action = action_data.integration_action
+        params = dict(action_data.integration_params)
+
+        # Inject call context into params
+        for s in self._summaries:
+            params.setdefault("call_context", [])
+            params["call_context"].append({  # type: ignore[union-attr]
+                "node": s.node_id,
+                "summary": s.summary,
+                "key_info": s.key_info,
+            })
+
+        result: dict[str, Any] = {}
+        try:
+            result = await self._dispatch_integration(
+                integration_id, integration_action, params, db_session
+            )
+        except Exception as exc:
+            logger.exception(
+                "Integration action failed: %s/%s", integration_id, integration_action
+            )
+            result = {"error": str(exc), "success": False}
+
+        # Inject result as context so the next conversation node can reference it
+        note = f"[Integration result: {json.dumps(result)}]"
+        self._summaries.append(
+            NodeSummary(
+                node_id=self._current_node.id,
+                node_name=f"integration:{integration_action}",
+                summary=note,
+                key_info=result,
+            )
+        )
+
+        # Auto-transition to next node
+        outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+        if outgoing:
+            edge = outgoing[0]
+            new_node = self._workflow.get_node(edge.target)
+            logger.info(
+                "Integration done → transitioning '%s' → '%s'",
+                self._current_node.id,
+                new_node.id,
+            )
+            self._current_node = new_node
+            self._iteration_count = 0
+            self._enter_node(new_node)
+
+        return ActionResult(
+            action_type="integration",
+            message="",
+            call_ended=False,
+            integration_result=result,
+        )
+
+    async def _dispatch_integration(
+        self,
+        integration_id: str,
+        action_name: str,
+        params: dict[str, Any],
+        db_session: Any,
+    ) -> dict[str, Any]:
+        """Load the Integration from DB and dispatch to the correct runtime."""
+        import json as _json
+        from uuid import UUID as _UUID
+
+        from app.crypto import decrypt
+        from app.db.models import Integration, IntegrationType
+
+        if db_session is None:
+            raise WorkflowError("db_session is required for integration actions")
+
+        integration = db_session.get(Integration, _UUID(integration_id))
+        if integration is None:
+            raise WorkflowError(f"Integration '{integration_id}' not found")
+
+        config: dict[str, Any] = _json.loads(decrypt(integration.config_encrypted))
+
+        if integration.type == IntegrationType.google_calendar:
+            from app.integrations.google_calendar import ACTIONS
+        elif integration.type == IntegrationType.webhook:
+            from app.integrations.webhook import ACTIONS
+        else:
+            raise WorkflowError(f"Unsupported integration type: {integration.type}")
+
+        handler = ACTIONS.get(action_name)
+        if handler is None:
+            raise WorkflowError(
+                f"Unknown action '{action_name}' for integration type '{integration.type}'"
+            )
+
+        return await handler(config, params)
 
     async def _call_decision_router(self, outgoing_edges: list[WorkflowEdge]) -> str:
         """Ask the Router LLM which edge to follow from a decision node."""

@@ -828,8 +828,8 @@ As a **workflow builder**, I want **action nodes that can call external services
 2. Should integration credentials be encrypted at rest in SQLite, or is that overkill for PoC?
 
 **Recorded answers:**
-- Calendar auth: _unanswered_
-- Credential encryption: _unanswered_
+- Calendar auth: OAuth (most users won't have a service account). Server handles the OAuth consent flow and stores the refresh token.
+- Credential encryption: Yes — encrypt all integration credentials at rest. This is a live PoC; anything stored from external systems must be encrypted.
 
 ---
 

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.calls import router as calls_router
+from app.api.integrations import router as integrations_router
 from app.api.phone_numbers import router as phone_numbers_router
 from app.api.workflows import router as workflows_router
 from app.auth import init_api_key
@@ -55,6 +56,7 @@ app.include_router(media_stream_router)
 app.include_router(workflows_router)
 app.include_router(phone_numbers_router)
 app.include_router(calls_router)
+app.include_router(integrations_router)
 
 
 @app.get("/health")

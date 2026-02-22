@@ -46,6 +46,7 @@ class ActionType(str, Enum):
 
     end_call = "end_call"
     transfer = "transfer"
+    integration = "integration"
 
 
 class ActionNodeData(BaseModel):
@@ -69,6 +70,24 @@ class ActionNodeData(BaseModel):
         description="Message to speak before transferring (transfer only).",
     )
 
+    # integration fields
+    integration_id: str = Field(
+        default="",
+        description="UUID of the Integration record to invoke (integration only).",
+    )
+    integration_action: str = Field(
+        default="",
+        description="Action to perform on the integration, e.g. 'check_availability' (integration only).",
+    )
+    integration_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Static parameters merged with call context before invoking the integration.",
+    )
+    integration_message: str = Field(
+        default="One moment please while I check that for you.",
+        description="Hold message spoken while the integration executes (integration only).",
+    )
+
     @model_validator(mode="after")
     def validate_action_fields(self) -> ActionNodeData:
         """Ensure required fields are provided for each action type."""
@@ -80,6 +99,11 @@ class ActionNodeData(BaseModel):
                 raise ValueError("transfer action requires a non-empty 'target_number'.")
             if not self.announcement:
                 raise ValueError("transfer action requires a non-empty 'announcement'.")
+        elif self.action_type == ActionType.integration:
+            if not self.integration_id:
+                raise ValueError("integration action requires a non-empty 'integration_id'.")
+            if not self.integration_action:
+                raise ValueError("integration action requires a non-empty 'integration_action'.")
         return self
 
 

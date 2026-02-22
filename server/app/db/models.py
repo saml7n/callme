@@ -3,6 +3,7 @@
 Tables:
 - Workflow — workflow definitions with graph JSON.
 - PhoneNumber — registered phone numbers with workflow assignment.
+- Integration — external service integrations (Google Calendar, webhook, etc.).
 - Call — call records with metadata.
 - CallEvent — timestamped events within a call.
 """
@@ -51,6 +52,33 @@ class PhoneNumber(SQLModel, table=True):
     number: str = Field(index=True, unique=True)  # E.164 format
     label: str = Field(default="")
     workflow_id: Optional[UUID] = Field(default=None, foreign_key="workflows.id")
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Integration
+# ---------------------------------------------------------------------------
+
+class IntegrationType(str, enum.Enum):
+    """Supported integration types."""
+
+    google_calendar = "google_calendar"
+    webhook = "webhook"
+
+
+class Integration(SQLModel, table=True):
+    """An external service integration with encrypted credentials."""
+
+    __tablename__ = "integrations"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    type: IntegrationType
+    name: str = Field(index=True)
+    config_encrypted: str = Field(
+        default="",
+        description="Fernet-encrypted JSON blob of credentials/config.",
+    )
+    created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
 

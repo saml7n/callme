@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Auth — API key for dashboard + API access
     callme_api_key: str = ""
 
+    # Encryption key for integration credentials (Fernet / base64)
+    callme_encryption_key: str = ""
+
     # Fallback transfer number for unrecoverable errors mid-call
     callme_fallback_number: str = ""
 
