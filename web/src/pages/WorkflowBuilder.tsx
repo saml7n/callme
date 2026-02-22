@@ -459,7 +459,7 @@ export default function WorkflowBuilder() {
 
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             onClick={handleSave}
             disabled={saving}
           >
@@ -467,6 +467,7 @@ export default function WorkflowBuilder() {
           </Button>
           <Button
             size="sm"
+            className="bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:text-indigo-300/50"
             onClick={() => setPublishOpen(true)}
             disabled={!savedId || saving}
           >
@@ -569,10 +570,14 @@ export default function WorkflowBuilder() {
             </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPublishOpen(false)}>
+            <Button variant="secondary" onClick={() => setPublishOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handlePublish} disabled={saving || !publishPhone}>
+            <Button
+              className="bg-indigo-600 text-white hover:bg-indigo-500"
+              onClick={handlePublish}
+              disabled={saving || !publishPhone}
+            >
               {saving ? 'Publishing…' : 'Publish'}
             </Button>
           </DialogFooter>
