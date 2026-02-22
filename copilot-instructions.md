@@ -70,14 +70,22 @@ CallMe is an AI-powered phone receptionist. The architecture is documented in `d
 - Write and run unit tests as specified in the story's "Unit tests" section.
 - All tests must pass: `pytest server/tests/` for server, `npm test` (vitest) for web.
 
-### D) QA verify
+### D) QA verify — MANDATORY, DO NOT SKIP
+- **QA verification is a hard gate.** You MUST complete QA before committing. Never commit a story without documented QA results.
 - Execute the QA verification steps listed in the story.
-- For Playwright QA: write a test file under `web/tests/e2e/` and run it.
-- **Note:** Vite must be started with `--host 0.0.0.0` for Playwright to reach it (default IPv6-only binding is not reachable). Use `npx vite --host 0.0.0.0` or set `server.host: true` in `vite.config.ts`.
+- For Playwright/browser QA: use browser automation tools (MCP Playwright or equivalent) to exercise every step in the story's QA section. Take a snapshot at each step and record pass/fail.
 - For phone call QA: document the test (what you said, what the AI said, timestamps) in the commit or story doc.
 - For API QA: run the documented `curl`/`httpx` commands and record the results.
+- **After QA, update `docs/stories.md`** with a "### Completion" section under the story listing: test counts, QA results (pass/fail per step), and any bugs found and fixed.
+- If QA reveals bugs, fix them and re-run QA before proceeding to commit.
+- **Vite note:** Vite must be started with `--host 0.0.0.0` for Playwright to reach it (default IPv6-only binding is not reachable). Use `npx vite --host 0.0.0.0` or set `server.host: true` in `vite.config.ts`.
 
-### E) Commit
+### E) Commit — only after QA passes
+- **Pre-commit checklist (all must be true):**
+  1. All unit tests pass.
+  2. QA verification completed and documented in `docs/stories.md`.
+  3. Acceptance criteria checked off (`- [x]`) in `docs/stories.md`.
+  4. A "### Completion" section added to the story with test counts, QA results, and commit hash.
 - Ensure working tree is clean except for intended changes.
 - Create exactly one commit for the story.
 - **Always commit at the end of every completed story** — do not leave uncommitted work.

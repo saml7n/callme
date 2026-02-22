@@ -65,6 +65,12 @@ function App() {
           >
             New Workflow
           </Link>
+          <Link
+            to="/settings/integrations"
+            className="px-5 py-2.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition font-medium"
+          >
+            Integrations
+          </Link>
         </div>
       </div>
     </div>

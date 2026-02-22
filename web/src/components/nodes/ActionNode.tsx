@@ -1,4 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { INTEGRATION_TYPE_LABELS } from '@/lib/types'
+import type { IntegrationType } from '@/lib/types'
 
 export interface ActionNodeData {
   label: string
@@ -6,6 +8,11 @@ export interface ActionNodeData {
   message?: string
   announcement?: string
   target_number?: string
+  integration_id?: string
+  integration_action?: string
+  integration_name?: string
+  integration_type?: IntegrationType
+  integration_missing?: boolean
   isEntry?: boolean
   [key: string]: unknown
 }
@@ -13,11 +20,24 @@ export interface ActionNodeData {
 const ACTION_LABELS: Record<string, string> = {
   end_call: 'End Call',
   transfer: 'Transfer',
+  integration: 'Integration',
 }
 
 const ACTION_ICONS: Record<string, string> = {
   end_call: '📞',
   transfer: '↗️',
+  integration: '🔗',
+}
+
+const INTEGRATION_ICONS: Record<string, string> = {
+  google_calendar: '📅',
+  webhook: '🔗',
+}
+
+const ACTION_DISPLAY: Record<string, string> = {
+  check_availability: 'Check Availability',
+  book_appointment: 'Book Appointment',
+  call_webhook: 'Call Webhook',
 }
 
 export default function ActionNode({ data, selected }: NodeProps) {
@@ -30,10 +50,18 @@ export default function ActionNode({ data, selected }: NodeProps) {
   const previewText =
     actionType === 'transfer'
       ? d.announcement ?? ''
-      : d.message ?? ''
+      : actionType === 'integration'
+        ? ''
+        : d.message ?? ''
 
   const preview =
     previewText.length > 100 ? previewText.slice(0, 100) + '…' : previewText
+
+  // Integration-specific display
+  const integrationIcon = d.integration_type ? (INTEGRATION_ICONS[d.integration_type] ?? '🔗') : '🔗'
+  const integrationLabel = d.integration_type ? (INTEGRATION_TYPE_LABELS[d.integration_type] ?? d.integration_type) : ''
+  const integrationActionLabel = d.integration_action ? (ACTION_DISPLAY[d.integration_action] ?? d.integration_action) : ''
+  const isMissing = d.integration_missing === true
 
   return (
     <div
@@ -84,14 +112,39 @@ export default function ActionNode({ data, selected }: NodeProps) {
             Terminates the call
           </p>
         )}
+
+        {actionType === 'integration' && (
+          <div className="pt-1 border-t border-gray-800 space-y-1">
+            {d.integration_name ? (
+              <p className="text-xs text-gray-300">
+                {integrationIcon} {integrationLabel} → {integrationActionLabel}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 italic">No integration selected</p>
+            )}
+            {isMissing && (
+              <span className="inline-block text-[10px] bg-yellow-900 text-yellow-300 px-1.5 py-0.5 rounded">
+                ⚠ Integration deleted
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Handles — action nodes only have a target (no source, they're terminal) */}
+      {/* Handles */}
       <Handle
         type="target"
         position={Position.Top}
         className="!w-3 !h-3 !bg-gray-600 !border-2 !border-gray-800"
       />
+      {/* Integration actions are NOT terminal — they continue to next node */}
+      {actionType === 'integration' && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="!w-3 !h-3 !bg-gray-600 !border-2 !border-gray-800"
+        />
+      )}
     </div>
   )
 }

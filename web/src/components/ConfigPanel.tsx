@@ -1,7 +1,11 @@
 /** Right sidebar — edit the selected node's configuration. */
 
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Node } from '@xyflow/react'
+import { Link } from 'react-router-dom'
+import { api } from '@/lib/api'
+import type { IntegrationItem, IntegrationType } from '@/lib/types'
+import { INTEGRATION_ACTIONS, INTEGRATION_TYPE_LABELS } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -9,7 +13,9 @@ import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -36,6 +42,14 @@ export default function ConfigPanel({
   const update = useCallback(
     (key: string, value: unknown) => {
       onUpdateNode(node.id, { ...data, [key]: value })
+    },
+    [node.id, data, onUpdateNode],
+  )
+
+  /** Update multiple keys at once (avoids stale-closure issues). */
+  const batchUpdate = useCallback(
+    (patch: Record<string, unknown>) => {
+      onUpdateNode(node.id, { ...data, ...patch })
     },
     [node.id, data, onUpdateNode],
   )
@@ -87,7 +101,7 @@ export default function ConfigPanel({
         <DecisionConfig data={data} update={update} />
       )}
       {node.type === 'action' && (
-        <ActionConfig data={data} update={update} />
+        <ActionConfig data={data} update={update} batchUpdate={batchUpdate} />
       )}
 
       <Separator className="bg-gray-800" />
@@ -224,23 +238,60 @@ function DecisionConfig({
 function ActionConfig({
   data,
   update,
+  batchUpdate,
 }: {
   data: Record<string, unknown>
   update: (key: string, value: unknown) => void
+  batchUpdate: (patch: Record<string, unknown>) => void
 }) {
   const actionType = (data.action_type as string) ?? 'end_call'
+  const [integrations, setIntegrations] = useState<IntegrationItem[]>([])
+
+  // Fetch integrations when integration type is selected
+  useEffect(() => {
+    if (actionType === 'integration') {
+      api.integrations.list().then(setIntegrations).catch(() => {})
+    }
+  }, [actionType])
+
+  const selectedIntegrationId = (data.integration_id as string) ?? ''
+  const selectedIntegration = integrations.find((i) => i.id === selectedIntegrationId)
+  const selectedType = (selectedIntegration?.type ?? data.integration_type ?? '') as IntegrationType | ''
+  const availableActions = selectedType ? INTEGRATION_ACTIONS[selectedType] ?? [] : []
+
+  // Group integrations by type for the dropdown
+  const grouped = integrations.reduce<Record<string, IntegrationItem[]>>((acc, item) => {
+    ;(acc[item.type] ??= []).push(item)
+    return acc
+  }, {})
 
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
         <Label className="text-gray-400">Action Type</Label>
-        <Select value={actionType} onValueChange={(v) => update('action_type', v)}>
+        <Select
+          value={actionType}
+          onValueChange={(v) => {
+            if (v !== 'integration') {
+              batchUpdate({
+                action_type: v,
+                integration_id: undefined,
+                integration_action: undefined,
+                integration_name: undefined,
+                integration_type: undefined,
+              })
+            } else {
+              update('action_type', v)
+            }
+          }}
+        >
           <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="end_call">End Call</SelectItem>
             <SelectItem value="transfer">Transfer</SelectItem>
+            <SelectItem value="integration">Integration</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -277,6 +328,80 @@ function ActionConfig({
               placeholder="Message to say before transferring..."
             />
           </div>
+        </>
+      )}
+
+      {actionType === 'integration' && (
+        <>
+          {/* Integration picker — grouped by type */}
+          <div className="space-y-1.5">
+            <Label className="text-gray-400">Integration</Label>
+            {integrations.length === 0 ? (
+              <p className="text-xs text-gray-500 italic">No integrations configured.</p>
+            ) : (
+              <Select
+                value={selectedIntegrationId}
+                onValueChange={(id) => {
+                  const item = integrations.find((i) => i.id === id)
+                  batchUpdate({
+                    integration_id: id,
+                    integration_name: item?.name ?? '',
+                    integration_type: item?.type ?? '',
+                    integration_action: '',
+                  })
+                }}
+              >
+                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                  <SelectValue placeholder="Select integration…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(grouped).map(([type, items]) => (
+                    <SelectGroup key={type}>
+                      <SelectLabel>
+                        {type === 'google_calendar' ? '📅' : '🔗'}{' '}
+                        {INTEGRATION_TYPE_LABELS[type as IntegrationType] ?? type}
+                      </SelectLabel>
+                      {items.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Action dropdown */}
+          {selectedType && availableActions.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-gray-400">Action</Label>
+              <Select
+                value={(data.integration_action as string) ?? ''}
+                onValueChange={(v) => update('integration_action', v)}
+              >
+                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                  <SelectValue placeholder="Select action…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableActions.map((a) => (
+                    <SelectItem key={a.value} value={a.value}>
+                      {a.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Manage link */}
+          <Link
+            to="/settings/integrations"
+            className="inline-block text-xs text-indigo-400 hover:text-indigo-300"
+          >
+            Manage integrations →
+          </Link>
         </>
       )}
     </div>

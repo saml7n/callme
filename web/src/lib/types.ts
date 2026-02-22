@@ -49,6 +49,42 @@ export interface WorkflowListItem {
 }
 
 // ---------------------------------------------------------------------------
+// Integration types
+// ---------------------------------------------------------------------------
+
+export type IntegrationType = 'google_calendar' | 'webhook'
+
+export interface IntegrationItem {
+  id: string
+  type: IntegrationType
+  name: string
+  config_redacted: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface IntegrationTestResult {
+  success: boolean
+  detail: string
+}
+
+/** Actions available per integration type. */
+export const INTEGRATION_ACTIONS: Record<IntegrationType, { value: string; label: string }[]> = {
+  google_calendar: [
+    { value: 'check_availability', label: 'Check Availability' },
+    { value: 'book_appointment', label: 'Book Appointment' },
+  ],
+  webhook: [
+    { value: 'call_webhook', label: 'Call Webhook' },
+  ],
+}
+
+export const INTEGRATION_TYPE_LABELS: Record<IntegrationType, string> = {
+  google_calendar: 'Google Calendar',
+  webhook: 'Webhook',
+}
+
+// ---------------------------------------------------------------------------
 // Phone number types
 // ---------------------------------------------------------------------------
 

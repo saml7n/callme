@@ -786,28 +786,28 @@ As a **workflow builder**, I want **action nodes that can call external services
 ### Acceptance criteria
 
 #### Integration registry (server)
-- [ ] New `integrations` table: `id`, `type` (`google_calendar` | `webhook`), `name` (user label), `config_json` (encrypted credentials/URLs), `created_at`.
-- [ ] `GET /api/integrations` — list all configured integrations (credentials redacted).
-- [ ] `POST /api/integrations` — create an integration. Validates config per type.
-- [ ] `PUT /api/integrations/{id}` — update config. `DELETE /api/integrations/{id}` — remove (blocked if referenced by an active workflow).
-- [ ] `POST /api/integrations/{id}/test` — performs a dry-run connection test (e.g. list calendars, ping webhook URL) and returns success/failure.
+- [x] New `integrations` table: `id`, `type` (`google_calendar` | `webhook`), `name` (user label), `config_json` (encrypted credentials/URLs), `created_at`.
+- [x] `GET /api/integrations` — list all configured integrations (credentials redacted).
+- [x] `POST /api/integrations` — create an integration. Validates config per type.
+- [x] `PUT /api/integrations/{id}` — update config. `DELETE /api/integrations/{id}` — remove (blocked if referenced by an active workflow).
+- [x] `POST /api/integrations/{id}/test` — performs a dry-run connection test (e.g. list calendars, ping webhook URL) and returns success/failure.
 
 #### Google Calendar integration
-- [ ] Config fields: `service_account_json` or OAuth refresh token, `calendar_id`.
-- [ ] Runtime actions exposed to the workflow engine:
+- [x] Config fields: `service_account_json` or OAuth refresh token, `calendar_id`.
+- [x] Runtime actions exposed to the workflow engine:
   - `check_availability` — given a date range (extracted by LLM), returns free/busy slots.
   - `book_appointment` — given a slot + caller name + notes, creates a calendar event.
-- [ ] The workflow engine can invoke these mid-conversation via a new `integration` action type on action nodes.
+- [x] The workflow engine can invoke these mid-conversation via a new `integration` action type on action nodes.
 
 #### Generic webhook integration
-- [ ] Config fields: `url`, `method` (POST/PUT), `headers` (key-value), optional `auth_header`.
-- [ ] Runtime action: `call_webhook` — sends a JSON payload built from the conversation context (caller number, extracted info, transcript summary). Returns the response body to the conversation context so the LLM can use it.
-- [ ] Timeout: 5s. On failure, the engine injects an error message into the conversation context and continues (doesn't crash the call).
+- [x] Config fields: `url`, `method` (POST/PUT), `headers` (key-value), optional `auth_header`.
+- [x] Runtime action: `call_webhook` — sends a JSON payload built from the conversation context (caller number, extracted info, transcript summary). Returns the response body to the conversation context so the LLM can use it.
+- [x] Timeout: 5s. On failure, the engine injects an error message into the conversation context and continues (doesn't crash the call).
 
 #### Workflow schema changes
-- [ ] Action nodes gain a new `action_type: "integration"` option alongside `end_call` and `transfer`.
-- [ ] When `action_type` is `integration`, the node data includes `integration_id` and `integration_action` (e.g. `check_availability`, `book_appointment`, `call_webhook`).
-- [ ] The engine pauses the conversation, executes the integration, injects the result into context, and then either continues to the next node or lets the LLM respond with the result.
+- [x] Action nodes gain a new `action_type: "integration"` option alongside `end_call` and `transfer`.
+- [x] When `action_type` is `integration`, the node data includes `integration_id` and `integration_action` (e.g. `check_availability`, `book_appointment`, `call_webhook`).
+- [x] The engine pauses the conversation, executes the integration, injects the result into context, and then either continues to the next node or lets the LLM respond with the result.
 
 ### Unit tests
 - **Google Calendar:** Mock Google API → `check_availability` returns slots. `book_appointment` creates event. API failure → graceful error message.
@@ -840,7 +840,7 @@ As a **workflow builder**, I want **the action node config panel to let me brows
 ### Acceptance criteria
 
 #### Config panel changes
-- [ ] When `action_type` is set to `integration` in the action node config panel, a new section appears:
+- [x] When `action_type` is set to `integration` in the action node config panel, a new section appears:
   - **Integration** dropdown — lists all integrations from `GET /api/integrations`, grouped by type (Google Calendar, Webhook).
   - **Action** dropdown — dynamically populated based on the selected integration type:
     - Google Calendar: `Check Availability`, `Book Appointment`.
@@ -849,12 +849,12 @@ As a **workflow builder**, I want **the action node config panel to let me brows
     - `check_availability`: date range hint (text, e.g. "Ask the caller for their preferred day").
     - `book_appointment`: fields to map (caller name source, notes source — from conversation context).
     - `call_webhook`: optional payload template (JSON editor or key-value pairs).
-- [ ] The node preview on the canvas shows the integration name + action (e.g. "📅 Google Calendar → Book Appointment").
-- [ ] Validation: if integration is selected but the referenced integration has been deleted, show a warning badge.
+- [x] The node preview on the canvas shows the integration name + action (e.g. "📅 Google Calendar → Book Appointment").
+- [x] Validation: if integration is selected but the referenced integration has been deleted, show a warning badge.
 
 #### Integration management link
-- [ ] A `/settings/integrations` page lists configured integrations with add/edit/delete/test.
-- [ ] The config panel includes a "Manage integrations →" link that opens the settings page in a new tab.
+- [x] A `/settings/integrations` page lists configured integrations with add/edit/delete/test.
+- [x] The config panel includes a "Manage integrations →" link that opens the settings page in a new tab.
 
 ### Unit tests
 - **Config panel:** Selecting `integration` action type shows integration dropdown. Selecting an integration shows its available actions. Selecting an action shows parameter fields. Integration dropdown is grouped by type.
@@ -871,6 +871,20 @@ As a **workflow builder**, I want **the action node config panel to let me brows
 
 ### Blocked until answered
 *(none)*
+
+### Completion
+- **Unit tests:** 12 new tests (54 total frontend, 268 server) — all passing.
+- **QA verification (browser):**
+  1. ✅ Created webhook + Google Calendar integrations on `/settings/integrations` page.
+  2. ✅ Opened workflow builder → added action node → set type to `integration`.
+  3. ✅ Selected Calendar → picked "Book Appointment" → node preview: "📅 Google Calendar → Book Appointment".
+  4. ✅ Switched to webhook → picked "Call Webhook" → node preview: "🔗 Webhook → Call Webhook".
+  5. ✅ Integration dropdown grouped by type (🔗 Webhook / 📅 Google Calendar groups).
+  6. ✅ Tested webhook connection → "✓ Connected" badge.
+  7. ✅ Deleted webhook integration successfully.
+  8. ✅ "Manage integrations →" link present in config panel.
+- **Bugfix during QA:** Fixed stale-closure issue where selecting integration didn't persist (multiple `update()` calls overwriting each other). Added `batchUpdate()` helper.
+- **Commit:** `0a94e90`
 
 ---
 

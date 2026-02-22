@@ -11,6 +11,7 @@ import WorkflowList from './pages/WorkflowList'
 import CallList from './pages/CallList'
 import CallDetail from './pages/CallDetail'
 import PhoneNumbers from './pages/PhoneNumbers'
+import Integrations from './pages/Integrations'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/calls" element={<AuthGuard><CallList /></AuthGuard>} />
         <Route path="/calls/:id" element={<AuthGuard><CallDetail /></AuthGuard>} />
         <Route path="/settings/phone-numbers" element={<AuthGuard><PhoneNumbers /></AuthGuard>} />
+        <Route path="/settings/integrations" element={<AuthGuard><Integrations /></AuthGuard>} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

@@ -3,6 +3,9 @@
 import type {
   CallDetail,
   CallListItem,
+  IntegrationItem,
+  IntegrationTestResult,
+  IntegrationType,
   PhoneNumberItem,
   WorkflowDetail,
   WorkflowGraph,
@@ -109,5 +112,30 @@ export const api = {
 
     delete: (id: string) =>
       request<void>(`/api/phone-numbers/${id}`, { method: 'DELETE' }),
+  },
+
+  integrations: {
+    list: () => request<IntegrationItem[]>('/api/integrations'),
+
+    create: (type: IntegrationType, name: string, config: Record<string, unknown>) =>
+      request<IntegrationItem>('/api/integrations', {
+        method: 'POST',
+        body: JSON.stringify({ type, name, config }),
+      }),
+
+    update: (id: string, body: { name?: string; config?: Record<string, unknown> }) =>
+      request<IntegrationItem>(`/api/integrations/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+
+    delete: (id: string) =>
+      request<void>(`/api/integrations/${id}`, { method: 'DELETE' }),
+
+    test: (id: string) =>
+      request<IntegrationTestResult>(`/api/integrations/${id}/test`, { method: 'POST' }),
+
+    oauthStart: (id: string) =>
+      request<{ url: string }>(`/api/integrations/${id}/oauth/start`),
   },
 }
