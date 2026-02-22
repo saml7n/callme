@@ -226,6 +226,18 @@ async def publish_workflow(
         w.updated_at = datetime.now(timezone.utc)
         session.add(w)
 
+    # Clear the old phone number's assignment if this workflow is moving numbers
+    old_phone = session.exec(
+        select(PhoneNumber).where(
+            PhoneNumber.workflow_id == workflow_id,
+            PhoneNumber.id != body.phone_number_id,
+        )
+    ).first()
+    if old_phone is not None:
+        old_phone.workflow_id = None
+        old_phone.updated_at = datetime.now(timezone.utc)
+        session.add(old_phone)
+
     # Assign phone number to this workflow
     phone.workflow_id = workflow_id
     phone.updated_at = datetime.now(timezone.utc)

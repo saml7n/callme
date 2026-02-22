@@ -416,7 +416,7 @@ export default function WorkflowBuilder() {
     setError(null)
     setConfirmDeactivate(null)
     try {
-      // Save first
+      // Save first, then publish with the updated version
       const graph = flowToWorkflowGraph(
         nodes,
         edges,
@@ -425,8 +425,10 @@ export default function WorkflowBuilder() {
         workflowName,
         version,
       )
-      await api.workflows.update(savedId, { name: workflowName, graph_json: graph })
-      await api.workflows.publish(savedId, publishPhoneId, version)
+      const saved = await api.workflows.update(savedId, { name: workflowName, graph_json: graph })
+      const latestVersion = saved.version
+      setVersion(latestVersion)
+      await api.workflows.publish(savedId, publishPhoneId, latestVersion)
       setSuccessMsg('Published!')
       setPublishOpen(false)
     } catch (err) {

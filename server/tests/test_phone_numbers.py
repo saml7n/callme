@@ -312,3 +312,46 @@ class TestPublishWithPhoneNumberId:
                 json={"phone_number_id": phone_id},
             )
             assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_republish_to_different_number_frees_old(self, db_session):
+        """Publishing a workflow to a new number unassigns the old phone number."""
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Register two phone numbers
+            resp = await c.post(
+                "/api/phone-numbers", json={"number": "+44600"},
+            )
+            phone_a_id = resp.json()["id"]
+
+            resp = await c.post(
+                "/api/phone-numbers", json={"number": "+44700"},
+            )
+            phone_b_id = resp.json()["id"]
+
+            # Create and publish workflow to phone A
+            resp = await c.post(
+                "/api/workflows",
+                json={"name": "WF Move", "graph_json": _minimal_graph()},
+            )
+            wf_id = resp.json()["id"]
+            await c.post(
+                f"/api/workflows/{wf_id}/publish",
+                json={"phone_number_id": phone_a_id},
+            )
+
+            # Re-publish same workflow to phone B
+            await c.post(
+                f"/api/workflows/{wf_id}/publish",
+                json={"phone_number_id": phone_b_id},
+            )
+
+            # Phone A should now be free (workflow_id = null)
+            resp = await c.get("/api/phone-numbers")
+            phones = {p["id"]: p for p in resp.json()}
+            assert phones[phone_a_id]["workflow_id"] is None
+            assert phones[phone_b_id]["workflow_id"] == wf_id
+
+            # Deleting phone A should now succeed
+            resp = await c.delete(f"/api/phone-numbers/{phone_a_id}")
+            assert resp.status_code == 204
