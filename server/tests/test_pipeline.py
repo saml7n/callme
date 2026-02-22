@@ -527,6 +527,17 @@ class FakeEngine:
             return resp
         return ("Fallback.", False)
 
+    async def handle_input_stream(
+        self, transcript: str
+    ) -> AsyncGenerator[str | ActionResult, None]:
+        """Streaming version — delegates to handle_input for fakes."""
+        response, _ended = await self.handle_input(transcript)
+        if isinstance(response, ActionResult):
+            yield response
+        else:
+            # Yield the full text as a single chunk (simulates streaming)
+            yield response
+
 
 class TestPipelineWithWorkflow:
     async def test_engine_greeting_used(self):
@@ -577,6 +588,42 @@ class TestPipelineWithWorkflow:
         assert engine.inputs == ["I need a cleaning"]
         # TTS got the engine's response
         assert "Sure, I can help with that." in tts.texts_synthesized
+
+        await pipeline.close()
+
+    async def test_engine_streaming_splits_sentences(self):
+        """Engine streaming response is split into sentences for TTS."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[
+            FakeTranscriptEvent(
+                transcript="Tell me about services",
+                is_final=True,
+                speech_final=True,
+                confidence=0.99,
+            ),
+        ])
+        tts = FakeTTS(audio_per_call=[
+            [b"\x00"],  # greeting
+            [b"\x01"],  # sentence 1
+            [b"\x02"],  # sentence 2
+        ])
+        llm = FakeLLM()
+        # Streaming yields full response; pipeline splits into sentences
+        engine = FakeEngine(
+            greeting="Hi!",
+            responses=[("We offer cleanings. We also do fillings.", False)],
+        )
+
+        pipeline = CallPipeline(
+            ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts, engine=engine,
+        )
+        await pipeline.start()
+        assert pipeline._transcript_task is not None
+        await pipeline._transcript_task
+
+        # Response split into two sentences for TTS
+        assert "We offer cleanings." in tts.texts_synthesized
+        assert "We also do fillings." in tts.texts_synthesized
 
         await pipeline.close()
 
@@ -753,6 +800,30 @@ class TestInterruption:
         assert len(clear_calls) >= 1
         assert clear_calls[0]["streamSid"] == "MZ1"
         assert pipeline._interrupted is True
+        # _speaking must be reset so subsequent transcripts don't false-interrupt
+        assert pipeline._speaking is False
+
+        await pipeline.close()
+
+    async def test_interrupt_resets_speaking_flag(self):
+        """After interrupt, _speaking is False so the next response isn't
+        falsely interrupted by leftover interim results."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[])
+        tts = FakeTTS(audio_per_call=[[b"\x00"]])
+        llm = FakeLLM()
+
+        pipeline = CallPipeline(ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts)
+        await pipeline.start()
+
+        pipeline._speaking = True
+        await pipeline._interrupt()
+        assert pipeline._speaking is False
+
+        # A second interrupt immediately after should be a no-op
+        ws.send_text.reset_mock()
+        await pipeline._interrupt()
+        assert ws.send_text.call_count == 0  # no extra clear sent
 
         await pipeline.close()
 

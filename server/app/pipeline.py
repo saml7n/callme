@@ -278,6 +278,7 @@ class CallPipeline:
         if not self._speaking:
             return
         self._interrupted = True
+        self._speaking = False
         try:
             await self._ws.send_text(_build_clear_message(self._stream_sid))
             logger.info("Interruption: sent clear, discarding queued audio")
@@ -482,53 +483,105 @@ class CallPipeline:
             await self._handle_llm_failure()
 
     async def _generate_engine_response(self, transcript: str) -> None:
-        """Get a response from the WorkflowEngine and speak it."""
+        """Stream a response from the WorkflowEngine with filler and sentence splitting.
+
+        Uses the engine's streaming API so TTS can begin as soon as the
+        first sentence is generated, rather than waiting for the full response.
+        """
+        buffer = ""
+        full_response = ""
         self._interrupted = False
+        first_chunk_received = False
+        filler_task: asyncio.Task[None] | None = None
 
         try:
             assert self._engine is not None
-            response, call_ended = await self._engine.handle_input(transcript)
 
-            if self._interrupted:
-                return
+            # Start filler timer while we wait for routing + first LLM tokens
+            if _filler_cache.ready:
+                filler_task = asyncio.create_task(self._play_filler_after_delay())
 
-            # Handle action result
-            if isinstance(response, ActionResult):
-                if response.message:
-                    logger.info("Engine action response: %s", response.message)
-                    await self._speak(response.message)
-                    self._messages.append({"role": "assistant", "content": response.message})
-                if self._call_logger:
-                    self._call_logger.log_action(
-                        response.action_type,
-                        {"message": response.message, "transfer_number": response.transfer_number or ""},
-                    )
-                    self._call_logger.flush()
-                if response.call_ended:
-                    await self._handle_end_call()
-                elif response.transfer_number:
-                    await self._handle_transfer(response.transfer_number)
-                return
+            async for item in self._engine.handle_input_stream(transcript):
+                if self._interrupted:
+                    break
 
-            # Normal conversation response
-            response_text = response
-            if response_text and not self._interrupted:
-                logger.info("Engine response: %s", response_text)
-                remaining = response_text
+                # Handle action results (not streamed — yielded as a single object)
+                if isinstance(item, ActionResult):
+                    if filler_task is not None:
+                        filler_task.cancel()
+                        try:
+                            await filler_task
+                        except asyncio.CancelledError:
+                            pass
+                        filler_task = None
+                    # Clear any playing filler
+                    if self._speaking:
+                        await self._interrupt()
+                        self._interrupted = False
+
+                    if item.message:
+                        logger.info("Engine action response: %s", item.message)
+                        await self._speak(item.message)
+                        self._messages.append({"role": "assistant", "content": item.message})
+                    if self._call_logger:
+                        self._call_logger.log_action(
+                            item.action_type,
+                            {"message": item.message, "transfer_number": item.transfer_number or ""},
+                        )
+                        self._call_logger.flush()
+                    if item.call_ended:
+                        await self._handle_end_call()
+                    elif item.transfer_number:
+                        await self._handle_transfer(item.transfer_number)
+                    return
+
+                # Text chunk from streaming responder
+                chunk = item
+
+                # Cancel filler on first real content
+                if not first_chunk_received:
+                    first_chunk_received = True
+                    if filler_task is not None:
+                        filler_task.cancel()
+                        try:
+                            await filler_task
+                        except asyncio.CancelledError:
+                            pass
+                        filler_task = None
+                    # If filler was playing, clear it
+                    if self._speaking:
+                        await self._interrupt()
+                        self._interrupted = False  # Reset — we want to speak the real response
+
+                buffer += chunk
+                full_response += chunk
+
+                # Eagerly send complete sentences
                 while not self._interrupted:
-                    sentence, remaining = split_first_sentence(remaining)
+                    sentence, remainder = split_first_sentence(buffer)
                     if not sentence:
                         break
+                    buffer = remainder
                     logger.info("Engine sentence → TTS: %s", sentence)
                     await self._speak(sentence)
-                if not self._interrupted:
-                    leftover = remaining.strip()
-                    if leftover:
-                        logger.info("Engine remainder → TTS: %s", leftover)
-                        await self._speak(leftover)
-                self._messages.append({"role": "assistant", "content": response_text})
+
+            # Cancel filler if engine returned empty
+            if filler_task is not None:
+                filler_task.cancel()
+
+            # Flush any remaining text
+            if not self._interrupted:
+                leftover = buffer.strip()
+                if leftover:
+                    logger.info("Engine remainder → TTS: %s", leftover)
+                    await self._speak(leftover)
+
+            # Add the complete response to conversation history
+            if full_response.strip():
+                self._messages.append({"role": "assistant", "content": full_response.strip()})
+                logger.info("Engine assistant: %s", full_response.strip())
                 if self._call_logger:
-                    self._call_logger.log_llm_response(response_text)
+                    self._call_logger.log_llm_response(full_response.strip())
                     self._call_logger.flush()
 
         except asyncio.CancelledError:

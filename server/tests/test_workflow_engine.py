@@ -877,3 +877,151 @@ class TestActionNodeEntry:
         assert result.action_type == "end_call"
         assert result.message == "We're closed."
         assert result.call_ended is True
+
+
+# ---------------------------------------------------------------------------
+# Streaming — handle_input_stream
+# ---------------------------------------------------------------------------
+
+class TestHandleInputStreamStay:
+    async def test_stream_stay_yields_chunks(self):
+        """handle_input_stream yields text chunks when router says STAY."""
+        responder = FakeLLM(["Welcome!", "We're open 9 to 5."])
+        router = FakeLLM(["STAY"])
+
+        engine = WorkflowEngine(_single_node_wf(), responder=responder, router=router)
+        await engine.start()
+
+        chunks: list[str] = []
+        async for item in engine.handle_input_stream("What are your hours?"):
+            assert isinstance(item, str)
+            chunks.append(item)
+
+        # FakeLLM yields the full response as one chunk via chat_stream
+        full = "".join(chunks)
+        assert full == "We're open 9 to 5."
+
+    async def test_stream_stay_updates_history(self):
+        """After stream is fully consumed, history is updated."""
+        responder = FakeLLM(["Welcome!", "Sure thing!"])
+        router = FakeLLM(["STAY"])
+
+        engine = WorkflowEngine(_single_node_wf(), responder=responder, router=router)
+        await engine.start()
+
+        async for _ in engine.handle_input_stream("Help me"):
+            pass
+
+        # Current node history should have user + assistant
+        history = engine._get_history()
+        assert history[-2]["role"] == "user"
+        assert history[-2]["content"] == "Help me"
+        assert history[-1]["role"] == "assistant"
+        assert "Sure thing!" in history[-1]["content"]
+
+
+class TestHandleInputStreamTransition:
+    async def test_stream_transition_yields_new_node_response(self):
+        """handle_input_stream yields response from the new node after transition."""
+        responder = FakeLLM([
+            "Welcome!",        # start() — greeting
+            "Let's book!",     # new node response after transition
+        ])
+        router = FakeLLM([
+            "e1",
+            '{"summary": "Caller wants booking.", "key_info": {}}',
+        ])
+
+        engine = WorkflowEngine(_two_node_wf(), responder=responder, router=router)
+        await engine.start()
+
+        chunks: list[str] = []
+        async for item in engine.handle_input_stream("I need a booking"):
+            assert isinstance(item, str)
+            chunks.append(item)
+
+        full = "".join(chunks)
+        assert full == "Let's book!"
+        assert engine.current_node.id == "n2"
+
+
+class TestHandleInputStreamAction:
+    async def test_stream_end_call_yields_action_result(self):
+        """handle_input_stream yields ActionResult for action nodes."""
+        wf = {
+            "id": "wf_action",
+            "name": "Action Test",
+            "version": 1,
+            "entry_node_id": "n1",
+            "nodes": [
+                {
+                    "id": "n1",
+                    "type": "conversation",
+                    "data": {"instructions": "Say goodbye.", "max_iterations": 10},
+                },
+                {
+                    "id": "end",
+                    "type": "action",
+                    "data": {"action_type": "end_call", "message": "Goodbye!"},
+                },
+            ],
+            "edges": [{"id": "e1", "source": "n1", "target": "end", "label": "Done"}],
+        }
+
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",
+            '{"summary": "Done", "key_info": {}}',
+        ])
+
+        engine = WorkflowEngine(wf, responder=responder, router=router)
+        await engine.start()
+
+        results: list[Any] = []
+        async for item in engine.handle_input_stream("Bye"):
+            results.append(item)
+
+        assert len(results) == 1
+        action = results[0]
+        assert isinstance(action, ActionResult)
+        assert action.action_type == "end_call"
+        assert action.message == "Goodbye!"
+        assert action.call_ended is True
+
+
+class TestHandleInputStreamMaxIterations:
+    async def test_stream_forces_transition_at_max(self):
+        """handle_input_stream forces transition when max_iterations reached."""
+        responder = FakeLLM([
+            "Welcome!",      # start
+            "Response 1.",   # iter 1
+            "Response 2.",   # iter 2
+            "New node!",     # new node after forced transition
+        ])
+        router = FakeLLM([
+            "STAY",          # iter 1
+            "STAY",          # iter 2
+            # iter 3 → forced transition (max=3)
+            '{"summary": "Max reached.", "key_info": {}}',
+        ])
+
+        wf = _two_node_wf()
+        wf["nodes"][0]["data"]["max_iterations"] = 3
+        engine = WorkflowEngine(wf, responder=responder, router=router)
+        await engine.start()
+
+        # First two iterations — STAY
+        async for _ in engine.handle_input_stream("Hello"):
+            pass
+        async for _ in engine.handle_input_stream("Tell me more"):
+            pass
+
+        # Third iteration — forced transition
+        chunks: list[str] = []
+        async for item in engine.handle_input_stream("Again"):
+            if isinstance(item, str):
+                chunks.append(item)
+
+        full = "".join(chunks)
+        assert full == "New node!"
+        assert engine.current_node.id == "n2"

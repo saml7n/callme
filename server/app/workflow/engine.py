@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from app.llm.openai import LLMClient
 from app.workflow.schema import (
@@ -239,6 +239,77 @@ class WorkflowEngine:
 
             return await self._transition(edge)
 
+    async def handle_input_stream(
+        self, transcript: str
+    ) -> AsyncGenerator[str | ActionResult, None]:
+        """Like handle_input but streams conversation responses.
+
+        Yields str chunks for conversation text, or a single ActionResult
+        for action nodes. The caller MUST fully consume or ``aclose()`` the
+        generator so the internal lock is released.
+        """
+        async with self._lock:
+            # If on a decision node, route through (non-streaming — decisions are fast)
+            if self._current_node.type == NodeType.decision:
+                logger.info(
+                    "handle_input_stream on decision node '%s' — routing first",
+                    self._current_node.id,
+                )
+                result = await self._route_through_decisions()
+                if isinstance(result, ActionResult):
+                    yield result
+                    return
+                # Yield the greeting as a single chunk (short text)
+                yield result
+                self._append_history("user", transcript)
+                self._iteration_count += 1
+            else:
+                self._append_history("user", transcript)
+                self._iteration_count += 1
+
+            # Check max_iterations
+            outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+            conv_data = self._current_node.get_conversation_data()
+            if self._iteration_count >= conv_data.max_iterations and outgoing:
+                logger.info(
+                    "Max iterations (%d) reached at '%s' — forcing transition (stream)",
+                    conv_data.max_iterations,
+                    self._current_node.id,
+                )
+                async for item in self._transition_stream(outgoing[0]):
+                    yield item
+                return
+
+            # Ask Router (non-streaming — it just returns STAY / edge-id)
+            decision = await self._call_router(outgoing)
+
+            if decision == "STAY" or not outgoing:
+                logger.info("Router: STAY at '%s' (stream)", self._current_node.id)
+                full_text = ""
+                async for chunk in self._call_responder_stream():
+                    full_text += chunk
+                    yield chunk
+                self._append_history("assistant", full_text.strip())
+                return
+
+            # Find matching edge
+            edge = self._find_edge(decision, outgoing)
+            if edge is None:
+                logger.warning(
+                    "Router returned unknown '%s' — staying at '%s' (stream)",
+                    decision,
+                    self._current_node.id,
+                )
+                full_text = ""
+                async for chunk in self._call_responder_stream():
+                    full_text += chunk
+                    yield chunk
+                self._append_history("assistant", full_text.strip())
+                return
+
+            async for item in self._transition_stream(edge):
+                yield item
+
     # ------------------------------------------------------------------
     # Router LLM
     # ------------------------------------------------------------------
@@ -276,6 +347,13 @@ class WorkflowEngine:
         messages = self._build_responder_messages(conv_data)
         response = await self._responder.chat(messages)
         return response.strip()
+
+    async def _call_responder_stream(self) -> AsyncGenerator[str, None]:
+        """Stream the response from the Responder LLM chunk by chunk."""
+        conv_data = self._current_node.get_conversation_data()
+        messages = self._build_responder_messages(conv_data)
+        async for chunk in self._responder.chat_stream(messages):
+            yield chunk
 
     def _build_responder_messages(
         self, conv_data: ConversationNodeData
@@ -443,6 +521,93 @@ class WorkflowEngine:
                 self._current_node.id,
                 new_node.id,
                 edge.id,
+            )
+            self._current_node = new_node
+            self._iteration_count = 0
+            self._enter_node(new_node)
+
+        raise WorkflowError("Too many consecutive decision nodes (possible loop)")
+
+    async def _transition_stream(
+        self, edge: WorkflowEdge
+    ) -> AsyncGenerator[str | ActionResult, None]:
+        """Like _transition but streams the final conversation response."""
+        old_node = self._current_node
+        new_node = self._workflow.get_node(edge.target)
+
+        if old_node.type == NodeType.conversation:
+            summary = await self._generate_summary()
+            self._summaries.append(summary)
+            logger.info(
+                "Transition (stream): '%s' → '%s' via '%s'. Summary: %s",
+                old_node.id, new_node.id, edge.id, summary.summary,
+            )
+        else:
+            logger.info(
+                "Transition (stream): '%s' → '%s' via '%s'",
+                old_node.id, new_node.id, edge.id,
+            )
+
+        self._current_node = new_node
+        self._iteration_count = 0
+        self._enter_node(new_node)
+
+        if new_node.type == NodeType.decision:
+            async for item in self._route_through_decisions_stream():
+                yield item
+            return
+
+        if new_node.type == NodeType.action:
+            yield self._execute_action()
+            return
+
+        # Conversation node — stream the first response
+        full_text = ""
+        async for chunk in self._call_responder_stream():
+            full_text += chunk
+            yield chunk
+        self._append_history("assistant", full_text.strip())
+
+    async def _route_through_decisions_stream(
+        self,
+    ) -> AsyncGenerator[str | ActionResult, None]:
+        """Like _route_through_decisions but streams the final response."""
+        max_depth = 10
+        for _ in range(max_depth):
+            if self._current_node.type == NodeType.conversation:
+                full_text = ""
+                async for chunk in self._call_responder_stream():
+                    full_text += chunk
+                    yield chunk
+                self._append_history("assistant", full_text.strip())
+                return
+
+            if self._current_node.type == NodeType.action:
+                yield self._execute_action()
+                return
+
+            if self._current_node.type != NodeType.decision:
+                raise WorkflowError(
+                    f"Unexpected node type '{self._current_node.type}' in decision chain"
+                )
+            outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+            if not outgoing:
+                raise WorkflowError(
+                    f"Decision node '{self._current_node.id}' has no outgoing edges"
+                )
+
+            if len(outgoing) == 1:
+                edge = outgoing[0]
+            else:
+                edge_id = await self._call_decision_router(outgoing)
+                edge = self._find_edge(edge_id, outgoing)
+                if edge is None:
+                    edge = outgoing[0]
+
+            new_node = self._workflow.get_node(edge.target)
+            logger.info(
+                "Decision '%s' → '%s' via '%s' (stream)",
+                self._current_node.id, new_node.id, edge.id,
             )
             self._current_node = new_node
             self._iteration_count = 0
