@@ -1,9 +1,9 @@
-"""Story 8 QA: Automated multi-turn conversation tests against live LLMs.
+"""Stories 8-9 QA: Automated multi-turn conversation tests against live LLMs.
 
 Exercises the WorkflowEngine with real OpenAI API calls through the
 reception_flow.json workflow. Each test simulates a different caller
-scenario and validates routing decisions, scope enforcement, and
-context passing.
+scenario and validates routing decisions, scope enforcement, context
+passing, and action node outcomes (end_call, transfer).
 
 Run:  cd server && uv run python scripts/qa_workflow.py
 """
@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.llm.openai import LLMClient
-from app.workflow.engine import WorkflowEngine
+from app.workflow.engine import WorkflowEngine, ActionResult
 
 WORKFLOW_PATH = os.path.join(
     os.path.dirname(__file__), "..", "schemas", "examples", "reception_flow.json"
@@ -406,13 +406,117 @@ async def test_reroute_inquiry_to_booking():
 
 
 # ======================================================================
+# Test 8: End-call action — booking completion triggers end_call
+# ======================================================================
+
+async def test_end_call_action():
+    """Caller books appointment, confirms, says goodbye → end_call ActionResult."""
+    print(f"\n{BOLD}{'=' * 60}{RESET}")
+    print(f"{BOLD}TEST 8: End-call action after booking{RESET}")
+    print(f"{BOLD}{'=' * 60}{RESET}")
+
+    wf = load_workflow()
+    engine = _make_engine(wf)
+
+    t0 = time.perf_counter()
+
+    greeting = await engine.start()
+    _print_exchange("agent", greeting)
+
+    # Route to booking
+    _print_exchange("caller", "I'd like to book a cleaning please")
+    r1, _ = await engine.handle_input("I'd like to book a cleaning please")
+    _print_exchange("agent", r1 if isinstance(r1, str) else r1.message)
+
+    # Multi-turn booking conversation, checking each for end_call
+    turns = [
+        "My name is Sarah Jones, next Monday at 2pm",
+        "Yes that's all confirmed, thanks",
+        "No nothing else, goodbye!",
+        "Goodbye!",
+    ]
+
+    got_action = False
+    for turn in turns:
+        if got_action:
+            break
+        _print_exchange("caller", turn)
+        resp, ended = await engine.handle_input(turn)
+        _print_exchange("agent", resp if isinstance(resp, str) else resp.message)
+        if isinstance(resp, ActionResult) and resp.action_type == "end_call":
+            got_action = True
+
+    elapsed = time.perf_counter() - t0
+    print(f"\n  ⏱ Total time: {elapsed:.1f}s")
+
+    _assert(
+        got_action or engine.current_node.id == "end_call",
+        f"Reached end_call action (current node: {engine.current_node.id})",
+    )
+
+
+# ======================================================================
+# Test 9: Transfer action — speak_to_human → transfer
+# ======================================================================
+
+async def test_transfer_action():
+    """Caller asks for human, confirms transfer → transfer ActionResult."""
+    print(f"\n{BOLD}{'=' * 60}{RESET}")
+    print(f"{BOLD}TEST 9: Transfer action from speak_to_human{RESET}")
+    print(f"{BOLD}{'=' * 60}{RESET}")
+
+    wf = load_workflow()
+    engine = _make_engine(wf)
+
+    t0 = time.perf_counter()
+
+    greeting = await engine.start()
+    _print_exchange("agent", greeting)
+
+    # Route to speak_to_human
+    _print_exchange("caller", "I'd like to speak to a real person please")
+    r1, _ = await engine.handle_input("I'd like to speak to a real person please")
+    _print_exchange("agent", r1 if isinstance(r1, str) else r1.message)
+    _assert(
+        engine.current_node.id == "speak_to_human",
+        f"Routed to speak_to_human (got: {engine.current_node.id})",
+    )
+
+    # Tell them why, then ask to be connected
+    _print_exchange("caller", "It's about a billing issue. Please connect me now.")
+    r2, ended = await engine.handle_input(
+        "It's about a billing issue. Please connect me now."
+    )
+    _print_exchange("agent", r2 if isinstance(r2, str) else r2.message)
+
+    got_transfer = isinstance(r2, ActionResult) and r2.action_type == "transfer"
+    if not got_transfer:
+        # One more turn to explicitly request the transfer
+        _print_exchange("caller", "Yes, please transfer me now")
+        r3, ended = await engine.handle_input("Yes, please transfer me now")
+        _print_exchange("agent", r3 if isinstance(r3, str) else r3.message)
+        got_transfer = isinstance(r3, ActionResult) and r3.action_type == "transfer"
+
+    _assert(
+        got_transfer or engine.current_node.id == "transfer_to_staff",
+        f"Triggered transfer action (current node: {engine.current_node.id})",
+    )
+    if got_transfer:
+        result = r2 if isinstance(r2, ActionResult) else r3
+        _assert(
+            result.transfer_number == "+447908121095",
+            f"Transfer number is +447908121095 (got: {result.transfer_number})",
+        )
+
+
+# ======================================================================
 # Main
 # ======================================================================
 
 async def main():
     global passed, failed
 
-    print(f"{BOLD}Story 8 QA — Automated Workflow Engine Tests (Live LLM){RESET}")
+    print(f"{BOLD}Stories 8-9 QA — Automated Workflow Engine Tests (Live LLM){RESET}")
     print(f"Using reception_flow.json with real OpenAI API calls.\n")
 
     tests = [
@@ -423,6 +527,8 @@ async def main():
         ("Scope enforcement", test_scope_enforcement),
         ("Context carries across nodes", test_context_carries_across),
         ("Re-route: inquiry → booking", test_reroute_inquiry_to_booking),
+        ("End-call action", test_end_call_action),
+        ("Transfer action", test_transfer_action),
     ]
 
     results = []

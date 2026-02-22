@@ -3,6 +3,8 @@
 import pytest
 
 from app.workflow.schema import (
+    ActionNodeData,
+    ActionType,
     ConversationNodeData,
     DecisionNodeData,
     NodeType,
@@ -224,3 +226,126 @@ class TestDecisionNodeWorkflow:
                 ],
                 "edges": [],
             })
+
+
+# ---------------------------------------------------------------------------
+# Action node data
+# ---------------------------------------------------------------------------
+
+class TestActionNodeData:
+    def test_valid_end_call(self):
+        data = ActionNodeData(
+            action_type=ActionType.end_call,
+            message="Goodbye!",
+        )
+        assert data.action_type == ActionType.end_call
+        assert data.message == "Goodbye!"
+
+    def test_valid_transfer(self):
+        data = ActionNodeData(
+            action_type=ActionType.transfer,
+            target_number="+447908121095",
+            announcement="Transferring you now.",
+        )
+        assert data.action_type == ActionType.transfer
+        assert data.target_number == "+447908121095"
+        assert data.announcement == "Transferring you now."
+
+    def test_end_call_missing_message_raises(self):
+        with pytest.raises(Exception, match="message"):
+            ActionNodeData(action_type=ActionType.end_call, message="")
+
+    def test_transfer_missing_target_raises(self):
+        with pytest.raises(Exception, match="target_number"):
+            ActionNodeData(
+                action_type=ActionType.transfer,
+                target_number="",
+                announcement="Transferring.",
+            )
+
+    def test_transfer_missing_announcement_raises(self):
+        with pytest.raises(Exception, match="announcement"):
+            ActionNodeData(
+                action_type=ActionType.transfer,
+                target_number="+441234567890",
+                announcement="",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Action node in workflow
+# ---------------------------------------------------------------------------
+
+class TestActionNodeWorkflow:
+    def test_workflow_with_action_node_parses(self):
+        wf = Workflow(**{
+            "id": "wf_a",
+            "name": "Action Test",
+            "version": 1,
+            "entry_node_id": "n1",
+            "nodes": [
+                {"id": "n1", "type": "conversation", "data": {"instructions": "Greet."}},
+                {
+                    "id": "a1",
+                    "type": "action",
+                    "data": {"action_type": "end_call", "message": "Bye!"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "n1", "target": "a1", "label": "Done"},
+            ],
+        })
+        assert len(wf.nodes) == 2
+        assert wf.nodes[1].type == NodeType.action
+
+    def test_action_node_get_action_data(self):
+        node = WorkflowNode(
+            id="a1",
+            type=NodeType.action,
+            data={"action_type": "end_call", "message": "Bye!"},
+        )
+        d = node.get_action_data()
+        assert d.action_type == ActionType.end_call
+        assert d.message == "Bye!"
+
+    def test_action_node_invalid_data_raises(self):
+        """Action node with missing action_type → validation error."""
+        with pytest.raises(Exception):
+            Workflow(**{
+                "id": "wf_bad",
+                "name": "Bad",
+                "version": 1,
+                "entry_node_id": "a1",
+                "nodes": [
+                    {"id": "a1", "type": "action", "data": {}},
+                ],
+                "edges": [],
+            })
+
+    def test_reception_flow_with_actions_parses(self):
+        """The updated reception_flow.json should parse with action nodes."""
+        import json
+        from pathlib import Path
+
+        flow_path = (
+            Path(__file__).resolve().parent.parent
+            / "schemas" / "examples" / "reception_flow.json"
+        )
+        data = json.loads(flow_path.read_text())
+        wf = Workflow(**data)
+
+        # Should have 7 nodes (5 original + 2 action nodes)
+        assert len(wf.nodes) == 7
+        action_nodes = [n for n in wf.nodes if n.type == NodeType.action]
+        assert len(action_nodes) == 2
+
+        # Verify action node data
+        end_call_node = wf.get_node("end_call")
+        ad = end_call_node.get_action_data()
+        assert ad.action_type == ActionType.end_call
+        assert "Goodbye" in ad.message
+
+        transfer_node = wf.get_node("transfer_to_staff")
+        td = transfer_node.get_action_data()
+        assert td.action_type == ActionType.transfer
+        assert td.target_number == "+447908121095"

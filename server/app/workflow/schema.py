@@ -13,7 +13,7 @@ class NodeType(str, Enum):
 
     conversation = "conversation"
     decision = "decision"
-    # action will be added in Story 9
+    action = "action"
 
 
 class ConversationNodeData(BaseModel):
@@ -41,6 +41,48 @@ class DecisionNodeData(BaseModel):
     )
 
 
+class ActionType(str, Enum):
+    """Supported action node types (extensible)."""
+
+    end_call = "end_call"
+    transfer = "transfer"
+
+
+class ActionNodeData(BaseModel):
+    """Data payload for an action node (performs a side effect)."""
+
+    action_type: ActionType
+
+    # end_call fields
+    message: str = Field(
+        default="",
+        description="Closing message to speak before hanging up (end_call only).",
+    )
+
+    # transfer fields
+    target_number: str = Field(
+        default="",
+        description="Phone number to transfer the call to (transfer only).",
+    )
+    announcement: str = Field(
+        default="",
+        description="Message to speak before transferring (transfer only).",
+    )
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> ActionNodeData:
+        """Ensure required fields are provided for each action type."""
+        if self.action_type == ActionType.end_call:
+            if not self.message:
+                raise ValueError("end_call action requires a non-empty 'message'.")
+        elif self.action_type == ActionType.transfer:
+            if not self.target_number:
+                raise ValueError("transfer action requires a non-empty 'target_number'.")
+            if not self.announcement:
+                raise ValueError("transfer action requires a non-empty 'announcement'.")
+        return self
+
+
 class Position(BaseModel):
     """Visual position of a node in the workflow builder."""
 
@@ -65,6 +107,10 @@ class WorkflowNode(BaseModel):
     def get_decision_data(self) -> DecisionNodeData:
         """Parse and validate data as DecisionNodeData."""
         return DecisionNodeData(**self.data)
+
+    def get_action_data(self) -> ActionNodeData:
+        """Parse and validate data as ActionNodeData."""
+        return ActionNodeData(**self.data)
 
 
 class WorkflowEdge(BaseModel):
@@ -121,6 +167,8 @@ class Workflow(BaseModel):
                 node.get_conversation_data()  # raises on invalid data
             elif node.type == NodeType.decision:
                 node.get_decision_data()  # raises on invalid data
+            elif node.type == NodeType.action:
+                node.get_action_data()  # raises on invalid data
 
         return self
 

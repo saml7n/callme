@@ -488,21 +488,21 @@ As a **developer**, I want **action nodes that perform side effects — ending t
 Action nodes are extensible by `action_type`. This story ships the first two types; more (e.g. `api_call`, `send_sms`, `schedule_callback`) can be added later without schema changes.
 
 ### Acceptance criteria
-- [ ] Action node type (`type: "action"`) added to the workflow schema:
+- [x] Action node type (`type: "action"`) added to the workflow schema:
   - `data.action_type` (str) — extensible enum, starting with: `end_call`, `transfer`.
   - Type-specific fields in `data`:
     - `end_call`: `{ message: str }` — closing message to speak before hanging up.
     - `transfer`: `{ target_number: str, announcement: str }` — message to speak, then transfer the call.
-- [ ] When the engine enters an action node:
+- [x] When the engine enters an action node:
   - `end_call` → returns `(message, call_ended=True)`.
   - `transfer` → returns `(announcement, call_ended=False)` + a `transfer` signal with the target number.
-- [ ] The `CallPipeline` handles action results:
+- [x] The `CallPipeline` handles action results:
   - `call_ended=True` → TTS speaks the closing message, then closes the Twilio WebSocket (call ends).
   - `transfer` → TTS speaks the announcement, then sends a Twilio REST API call to update the live call with `<Dial><Number>target</Number></Dial>` TwiML (or closes WebSocket with transfer TwiML).
-- [ ] Update `reception_flow.json` to include:
+- [x] Update `reception_flow.json` to include:
   - An `end_call` action after the general inquiry branch.
   - A `transfer` action for the "speak to human" branch.
-- [ ] Unknown `action_type` raises a descriptive `WorkflowError`.
+- [x] Unknown `action_type` raises a descriptive `WorkflowError`.
 
 ### Unit tests
 - **End call action:** engine returns message + `call_ended=True`.
@@ -524,8 +524,13 @@ Action nodes are extensible by `action_type`. This story ships the first two typ
 2. For PoC testing, should transfer go to a real number, or just play an announcement and hang up?
 
 **Recorded answers:**
-- Transfer method: _unanswered_
-- Transfer target: _unanswered_
+- Transfer method: Use Twilio REST API to update the live call with `<Dial>` TwiML. Provides full control during the call.
+- Transfer target: Real transfer to a configurable number. Default test number: `07908121095`. The `target_number` is specified in the action node's `data`.
+
+### Results
+- **Unit tests:** 145 passed (19 new: 5 schema, 6 engine, 6 pipeline action tests + 2 engine fixture tests). `uv run pytest tests/ -v` — all green.
+- **QA tests (live LLM):** 31/31 assertions passed across 9 tests (7 Story 8 + 2 Story 9). New tests: `test_end_call_action` (booking → end_call), `test_transfer_action` (speak_to_human → transfer).
+- **Implementation:** `ActionType` enum, `ActionNodeData` Pydantic model, `ActionResult` dataclass. Engine returns `str | ActionResult` from `start()` / `handle_input()`. Pipeline handles end_call (close) and transfer (Twilio REST API). `ActionNode.tsx` web component (red theme).
 
 ---
 

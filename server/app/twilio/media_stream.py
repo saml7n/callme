@@ -125,6 +125,7 @@ async def media_stream(ws: WebSocket) -> None:
                     pipeline = CallPipeline(
                         ws=ws,
                         stream_sid=state.stream_sid,
+                        call_sid=state.call_sid,
                         workflow=_DEFAULT_WORKFLOW,
                     )
                     await pipeline.start()

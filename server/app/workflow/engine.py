@@ -15,6 +15,8 @@ from typing import Any
 
 from app.llm.openai import LLMClient
 from app.workflow.schema import (
+    ActionNodeData,
+    ActionType,
     ConversationNodeData,
     DecisionNodeData,
     NodeType,
@@ -28,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 class WorkflowError(Exception):
     """Raised on workflow engine errors."""
+
+
+@dataclass
+class ActionResult:
+    """Result returned when the engine enters an action node."""
+
+    action_type: str
+    message: str  # text to speak before performing the action
+    call_ended: bool = False  # True for end_call
+    transfer_number: str = ""  # phone number for transfer
 
 
 @dataclass
@@ -138,11 +150,12 @@ class WorkflowEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    async def start(self) -> str:
+    async def start(self) -> str | ActionResult:
         """Enter the entry node and return an initial response.
 
         If the entry node is a decision node, silently route through it
         until we reach a conversation node.
+        Returns a str for conversation nodes, or ActionResult for action nodes.
         """
         self._enter_node(self._current_node)
 
@@ -150,12 +163,16 @@ class WorkflowEngine:
         if self._current_node.type == NodeType.decision:
             return await self._route_through_decisions()
 
+        # If entry is an action node, execute it immediately
+        if self._current_node.type == NodeType.action:
+            return self._execute_action()
+
         response = await self._call_responder()
         self._append_history("assistant", response)
         logger.info("Engine started at node '%s': %s", self._current_node.id, response)
         return response
 
-    async def handle_input(self, transcript: str) -> tuple[str, bool]:
+    async def handle_input(self, transcript: str) -> tuple[str | ActionResult, bool]:
         """Process caller input and return (response_text, call_ended).
 
         Steps:
@@ -166,6 +183,8 @@ class WorkflowEngine:
 
         Uses a lock to prevent concurrent calls from interleaving with
         in-flight transitions (e.g. decision node routing).
+
+        The response may be a str (conversation) or ActionResult (action node).
         """
         async with self._lock:
             # If we're on a decision node (transition was interrupted or
@@ -175,7 +194,9 @@ class WorkflowEngine:
                     "handle_input called on decision node '%s' — routing through first",
                     self._current_node.id,
                 )
-                response = await self._route_through_decisions()
+                result = await self._route_through_decisions()
+                if isinstance(result, ActionResult):
+                    return result, result.call_ended
                 # Now we're on a conversation node — add the transcript and continue
                 self._append_history("user", transcript)
                 self._iteration_count += 1
@@ -313,12 +334,13 @@ class WorkflowEngine:
     # Transitions & Summaries
     # ------------------------------------------------------------------
 
-    async def _transition(self, edge: WorkflowEdge) -> tuple[str, bool]:
+    async def _transition(self, edge: WorkflowEdge) -> tuple[str | ActionResult, bool]:
         """Transition to a new node via the given edge.
 
         If the current node is a conversation node, generates a summary first.
         If the target node is a decision node, chains through decisions until
         a conversation node is reached.
+        If the target node is an action node, executes the action immediately.
         """
         old_node = self._current_node
         new_node = self._workflow.get_node(edge.target)
@@ -349,7 +371,15 @@ class WorkflowEngine:
 
         # If new node is a decision node, route through it silently
         if new_node.type == NodeType.decision:
-            return await self._route_through_decisions(), False
+            result = await self._route_through_decisions()
+            if isinstance(result, ActionResult):
+                return result, result.call_ended
+            return result, False
+
+        # If new node is an action node, execute it immediately
+        if new_node.type == NodeType.action:
+            result = self._execute_action()
+            return result, result.call_ended
 
         # Generate first response in new conversation node
         response = await self._call_responder()
@@ -357,8 +387,8 @@ class WorkflowEngine:
 
         return response, False
 
-    async def _route_through_decisions(self) -> str:
-        """Route through consecutive decision nodes until reaching a conversation node.
+    async def _route_through_decisions(self) -> str | ActionResult:
+        """Route through consecutive decision nodes until reaching a conversation or action node.
 
         Decision nodes produce no spoken output — they silently pick an edge
         and move to the next node. This method handles chaining through multiple
@@ -366,12 +396,20 @@ class WorkflowEngine:
         """
         max_depth = 10  # safety guard against infinite loops
         for _ in range(max_depth):
-            if self._current_node.type != NodeType.decision:
+            if self._current_node.type == NodeType.conversation:
                 # Reached a conversation node — generate a response
                 response = await self._call_responder()
                 self._append_history("assistant", response)
                 return response
 
+            if self._current_node.type == NodeType.action:
+                # Reached an action node — execute it
+                return self._execute_action()
+
+            if self._current_node.type != NodeType.decision:
+                raise WorkflowError(
+                    f"Unexpected node type '{self._current_node.type}' in decision chain"
+                )
             outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
             if not outgoing:
                 raise WorkflowError(
@@ -411,6 +449,40 @@ class WorkflowEngine:
             self._enter_node(new_node)
 
         raise WorkflowError("Too many consecutive decision nodes (possible loop)")
+
+    def _execute_action(self) -> ActionResult:
+        """Execute the current action node and return an ActionResult.
+
+        Action nodes perform side effects:
+        - ``end_call``: returns a closing message with call_ended=True.
+        - ``transfer``: returns an announcement with the target phone number.
+        - Unknown action types raise WorkflowError.
+        """
+        action_data = self._current_node.get_action_data()
+        logger.info(
+            "Executing action node '%s': %s",
+            self._current_node.id,
+            action_data.action_type,
+        )
+
+        if action_data.action_type == ActionType.end_call:
+            return ActionResult(
+                action_type="end_call",
+                message=action_data.message,
+                call_ended=True,
+            )
+        elif action_data.action_type == ActionType.transfer:
+            return ActionResult(
+                action_type="transfer",
+                message=action_data.announcement,
+                call_ended=False,
+                transfer_number=action_data.target_number,
+            )
+        else:
+            raise WorkflowError(
+                f"Unknown action_type '{action_data.action_type}' "
+                f"in action node '{self._current_node.id}'"
+            )
 
     async def _call_decision_router(self, outgoing_edges: list[WorkflowEdge]) -> str:
         """Ask the Router LLM which edge to follow from a decision node."""

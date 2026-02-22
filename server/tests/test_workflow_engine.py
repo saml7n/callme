@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.workflow.engine import WorkflowEngine, NodeSummary, WorkflowError
+from app.workflow.engine import WorkflowEngine, ActionResult, NodeSummary, WorkflowError
 
 
 # ---------------------------------------------------------------------------
@@ -637,3 +637,243 @@ class TestDecisionNode:
         system_msg = decision_call[0]["content"]
         assert "John" in system_msg
         assert "cleaning" in system_msg
+
+
+# ---------------------------------------------------------------------------
+# Action node workflow fixtures
+# ---------------------------------------------------------------------------
+
+def _action_end_call_wf() -> dict:
+    """Greeting → end_call action."""
+    return {
+        "id": "wf_end",
+        "name": "End Call Flow",
+        "version": 1,
+        "entry_node_id": "greeting",
+        "nodes": [
+            {
+                "id": "greeting",
+                "type": "conversation",
+                "data": {
+                    "instructions": "Greet the caller.",
+                    "max_iterations": 3,
+                },
+            },
+            {
+                "id": "end",
+                "type": "action",
+                "data": {
+                    "action_type": "end_call",
+                    "message": "Thank you for calling! Goodbye.",
+                },
+            },
+        ],
+        "edges": [
+            {"id": "e1", "source": "greeting", "target": "end", "label": "Conversation done"},
+        ],
+    }
+
+
+def _action_transfer_wf() -> dict:
+    """Greeting → transfer action."""
+    return {
+        "id": "wf_transfer",
+        "name": "Transfer Flow",
+        "version": 1,
+        "entry_node_id": "greeting",
+        "nodes": [
+            {
+                "id": "greeting",
+                "type": "conversation",
+                "data": {
+                    "instructions": "Greet the caller.",
+                    "max_iterations": 3,
+                },
+            },
+            {
+                "id": "xfer",
+                "type": "action",
+                "data": {
+                    "action_type": "transfer",
+                    "target_number": "+447908121095",
+                    "announcement": "I'll connect you now.",
+                },
+            },
+        ],
+        "edges": [
+            {"id": "e1", "source": "greeting", "target": "xfer", "label": "Wants to speak to human"},
+        ],
+    }
+
+
+def _decision_to_action_wf() -> dict:
+    """Greeting → Decision → end_call / transfer."""
+    return {
+        "id": "wf_d2a",
+        "name": "Decision to Action",
+        "version": 1,
+        "entry_node_id": "greeting",
+        "nodes": [
+            {
+                "id": "greeting",
+                "type": "conversation",
+                "data": {"instructions": "Greet.", "max_iterations": 3},
+            },
+            {
+                "id": "router",
+                "type": "decision",
+                "data": {"instruction": "End or transfer?"},
+            },
+            {
+                "id": "end",
+                "type": "action",
+                "data": {"action_type": "end_call", "message": "Bye!"},
+            },
+            {
+                "id": "xfer",
+                "type": "action",
+                "data": {
+                    "action_type": "transfer",
+                    "target_number": "+441234",
+                    "announcement": "Connecting...",
+                },
+            },
+        ],
+        "edges": [
+            {"id": "e1", "source": "greeting", "target": "router", "label": "Done"},
+            {"id": "e2", "source": "router", "target": "end", "label": "End call"},
+            {"id": "e3", "source": "router", "target": "xfer", "label": "Transfer"},
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action node tests
+# ---------------------------------------------------------------------------
+
+class TestActionNodeEndCall:
+    async def test_end_call_returns_action_result(self):
+        """Transitioning to end_call returns ActionResult with call_ended=True."""
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",  # transition to end action
+            '{"summary": "Greeting done.", "key_info": {}}',
+        ])
+
+        engine = WorkflowEngine(_action_end_call_wf(), responder=responder, router=router)
+        await engine.start()
+
+        result, ended = await engine.handle_input("Goodbye")
+        assert isinstance(result, ActionResult)
+        assert result.action_type == "end_call"
+        assert result.message == "Thank you for calling! Goodbye."
+        assert result.call_ended is True
+        assert ended is True
+
+    async def test_end_call_ignores_outgoing_edges(self):
+        """end_call is terminal — no further transitions."""
+        wf = _action_end_call_wf()
+        # Add a spurious edge from end node
+        wf["edges"].append(
+            {"id": "e_spurious", "source": "end", "target": "greeting", "label": "Loop back"}
+        )
+
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",
+            '{"summary": "Done.", "key_info": {}}',
+        ])
+
+        engine = WorkflowEngine(wf, responder=responder, router=router)
+        await engine.start()
+
+        result, ended = await engine.handle_input("Bye")
+        # Still returns ActionResult — edges after end_call are ignored
+        assert isinstance(result, ActionResult)
+        assert result.call_ended is True
+
+
+class TestActionNodeTransfer:
+    async def test_transfer_returns_action_result(self):
+        """Transitioning to transfer returns ActionResult with transfer_number."""
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",
+            '{"summary": "Wants human.", "key_info": {}}',
+        ])
+
+        engine = WorkflowEngine(_action_transfer_wf(), responder=responder, router=router)
+        await engine.start()
+
+        result, ended = await engine.handle_input("I want to talk to a person")
+        assert isinstance(result, ActionResult)
+        assert result.action_type == "transfer"
+        assert result.message == "I'll connect you now."
+        assert result.transfer_number == "+447908121095"
+        assert result.call_ended is False
+        assert ended is False
+
+
+class TestDecisionToAction:
+    async def test_decision_routes_to_end_call(self):
+        """Decision node → end_call action."""
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",  # conversation router → transition to decision
+            '{"summary": "Done.", "key_info": {}}',
+            "e2",  # decision router → end_call
+        ])
+
+        engine = WorkflowEngine(_decision_to_action_wf(), responder=responder, router=router)
+        await engine.start()
+
+        result, ended = await engine.handle_input("I'm done")
+        assert isinstance(result, ActionResult)
+        assert result.action_type == "end_call"
+        assert result.call_ended is True
+
+    async def test_decision_routes_to_transfer(self):
+        """Decision node → transfer action."""
+        responder = FakeLLM(["Hello!"])
+        router = FakeLLM([
+            "e1",
+            '{"summary": "Wants agent.", "key_info": {}}',
+            "e3",  # decision router → transfer
+        ])
+
+        engine = WorkflowEngine(_decision_to_action_wf(), responder=responder, router=router)
+        await engine.start()
+
+        result, ended = await engine.handle_input("Connect me to someone")
+        assert isinstance(result, ActionResult)
+        assert result.action_type == "transfer"
+        assert result.transfer_number == "+441234"
+        assert result.call_ended is False
+
+
+class TestActionNodeEntry:
+    async def test_action_as_entry_node(self):
+        """Action node as entry node returns ActionResult immediately."""
+        wf = {
+            "id": "wf_instant_end",
+            "name": "Instant End",
+            "version": 1,
+            "entry_node_id": "end",
+            "nodes": [
+                {
+                    "id": "end",
+                    "type": "action",
+                    "data": {"action_type": "end_call", "message": "We're closed."},
+                },
+            ],
+            "edges": [],
+        }
+        responder = FakeLLM([])
+        router = FakeLLM([])
+
+        engine = WorkflowEngine(wf, responder=responder, router=router)
+        result = await engine.start()
+        assert isinstance(result, ActionResult)
+        assert result.action_type == "end_call"
+        assert result.message == "We're closed."
+        assert result.call_ended is True

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.pipeline import CallPipeline, SYSTEM_PROMPT, GREETING, split_first_sentence
+from app.workflow.engine import ActionResult
 
 
 # ---------------------------------------------------------------------------
@@ -495,16 +496,20 @@ class TestConversationHistory:
 class FakeEngine:
     """Minimal fake WorkflowEngine for pipeline integration tests."""
 
-    def __init__(self, greeting: str = "Engine greeting.", responses: list[tuple[str, bool]] | None = None):
+    def __init__(
+        self,
+        greeting: str | ActionResult = "Engine greeting.",
+        responses: list[tuple[str | ActionResult, bool]] | None = None,
+    ):
         self._greeting = greeting
         self._responses = responses or [("Engine response.", False)]
         self._call_index = 0
         self.inputs: list[str] = []
 
-    async def start(self) -> str:
+    async def start(self) -> str | ActionResult:
         return self._greeting
 
-    async def handle_input(self, transcript: str) -> tuple[str, bool]:
+    async def handle_input(self, transcript: str) -> tuple[str | ActionResult, bool]:
         self.inputs.append(transcript)
         if self._call_index < len(self._responses):
             resp = self._responses[self._call_index]
@@ -580,4 +585,132 @@ class TestPipelineWithoutWorkflow:
         assert tts.texts_synthesized[0] == GREETING
         assert pipeline.messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
 
+        await pipeline.close()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline with ActionResult — end_call and transfer
+# ---------------------------------------------------------------------------
+
+class TestPipelineEndCallAction:
+    async def test_end_call_action_speaks_and_closes(self):
+        """ActionResult end_call → speak message, then close pipeline."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[
+            FakeTranscriptEvent(
+                transcript="I'm done",
+                is_final=True,
+                speech_final=True,
+                confidence=0.99,
+            ),
+        ])
+        tts = FakeTTS(audio_per_call=[
+            [b"\x00"],  # greeting
+            [b"\x01"],  # end_call message
+        ])
+        llm = FakeLLM()
+        action = ActionResult(
+            action_type="end_call",
+            message="Thank you for calling! Goodbye.",
+            call_ended=True,
+        )
+        engine = FakeEngine(
+            greeting="Hi!",
+            responses=[(action, True)],
+        )
+
+        pipeline = CallPipeline(
+            ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts, engine=engine,
+        )
+        await pipeline.start()
+        assert pipeline._transcript_task is not None
+        await pipeline._transcript_task
+
+        # Message was spoken via TTS
+        assert "Thank you for calling! Goodbye." in tts.texts_synthesized
+        # Pipeline closed
+        assert pipeline._closed is True
+
+    async def test_end_call_action_as_greeting(self):
+        """If engine.start() returns end_call ActionResult, speak and close immediately."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[])
+        tts = FakeTTS(audio_per_call=[[b"\x00"]])
+        llm = FakeLLM()
+        greeting_action = ActionResult(
+            action_type="end_call",
+            message="We're closed. Please call back tomorrow.",
+            call_ended=True,
+        )
+        engine = FakeEngine(greeting=greeting_action)
+
+        pipeline = CallPipeline(
+            ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts, engine=engine,
+        )
+        await pipeline.start()
+
+        assert "We're closed. Please call back tomorrow." in tts.texts_synthesized
+        assert pipeline._closed is True
+        # No transcript task started (call ended immediately)
+        assert pipeline._transcript_task is None
+
+
+class TestPipelineTransferAction:
+    async def test_transfer_action_speaks_announcement(self):
+        """ActionResult transfer → speak announcement."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[
+            FakeTranscriptEvent(
+                transcript="Connect me to someone",
+                is_final=True,
+                speech_final=True,
+                confidence=0.99,
+            ),
+        ])
+        tts = FakeTTS(audio_per_call=[
+            [b"\x00"],  # greeting
+            [b"\x01"],  # transfer announcement
+        ])
+        llm = FakeLLM()
+        action = ActionResult(
+            action_type="transfer",
+            message="I'll connect you now.",
+            call_ended=False,
+            transfer_number="+447908121095",
+        )
+        engine = FakeEngine(
+            greeting="Hi!",
+            responses=[(action, False)],
+        )
+
+        pipeline = CallPipeline(
+            ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts, engine=engine,
+            call_sid="CA123",
+        )
+        await pipeline.start()
+        assert pipeline._transcript_task is not None
+
+        # Patch _handle_transfer to avoid real HTTP call
+        pipeline._handle_transfer = AsyncMock()
+        await pipeline._transcript_task
+
+        assert "I'll connect you now." in tts.texts_synthesized
+        pipeline._handle_transfer.assert_awaited_once_with("+447908121095")
+
+    async def test_transfer_skipped_without_call_sid(self):
+        """Transfer logs error and returns when no call_sid is available."""
+        ws = make_ws_mock()
+        stt = FakeSTT(events=[])
+        tts = FakeTTS(audio_per_call=[[b"\x00"]])
+        llm = FakeLLM()
+
+        pipeline = CallPipeline(
+            ws=ws, stream_sid="MZ1", stt=stt, llm=llm, tts=tts,
+            call_sid="",
+        )
+        await pipeline.start()
+
+        # Directly test _handle_transfer with no call_sid set
+        await pipeline._handle_transfer("+441234567890")
+        # Should not raise — just logs error and returns
         await pipeline.close()

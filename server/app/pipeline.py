@@ -17,7 +17,7 @@ from fastapi import WebSocket
 from app.llm.openai import LLMClient
 from app.stt.deepgram import DeepgramSTTClient
 from app.tts.elevenlabs import ElevenLabsTTSClient
-from app.workflow.engine import WorkflowEngine
+from app.workflow.engine import ActionResult, WorkflowEngine
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ class CallPipeline:
         ws: WebSocket,
         stream_sid: str,
         *,
+        call_sid: str = "",
         stt: DeepgramSTTClient | None = None,
         llm: LLMClient | None = None,
         tts: ElevenLabsTTSClient | None = None,
@@ -82,6 +83,7 @@ class CallPipeline:
     ) -> None:
         self._ws = ws
         self._stream_sid = stream_sid
+        self._call_sid = call_sid
         self._stt = stt or DeepgramSTTClient()
         self._llm = llm or LLMClient()
         self._tts = tts or ElevenLabsTTSClient()
@@ -118,7 +120,19 @@ class CallPipeline:
 
         # Proactive greeting — from engine or hardcoded
         if self._engine is not None:
-            greeting = await self._engine.start()
+            result = await self._engine.start()
+            if isinstance(result, ActionResult):
+                # Action node as greeting (unusual but possible)
+                await self._speak(result.message)
+                self._messages.append({"role": "assistant", "content": result.message})
+                if result.call_ended:
+                    await self._handle_end_call()
+                    return
+                if result.transfer_number:
+                    await self._handle_transfer(result.transfer_number)
+                    return
+                return
+            greeting = result
         else:
             greeting = self._greeting
 
@@ -259,7 +273,22 @@ class CallPipeline:
         """Get a response from the WorkflowEngine and speak it."""
         try:
             assert self._engine is not None
-            response_text, call_ended = await self._engine.handle_input(transcript)
+            response, call_ended = await self._engine.handle_input(transcript)
+
+            # Handle action result
+            if isinstance(response, ActionResult):
+                if response.message:
+                    logger.info("Engine action response: %s", response.message)
+                    await self._speak(response.message)
+                    self._messages.append({"role": "assistant", "content": response.message})
+                if response.call_ended:
+                    await self._handle_end_call()
+                elif response.transfer_number:
+                    await self._handle_transfer(response.transfer_number)
+                return
+
+            # Normal conversation response
+            response_text = response
             if response_text:
                 logger.info("Engine response: %s", response_text)
                 # Split into sentences for low-latency TTS
@@ -286,3 +315,58 @@ class CallPipeline:
                 await self._ws.send_text(msg)
         except Exception:
             logger.exception("Error in TTS/send for text: %s", text)
+
+    async def _handle_end_call(self) -> None:
+        """End the call gracefully after speaking the closing message."""
+        logger.info("End-call action — closing pipeline")
+        await self.close()
+
+    async def _handle_transfer(self, target_number: str) -> None:
+        """Transfer the call to another number via Twilio REST API.
+
+        Updates the live call with <Dial> TwiML so Twilio connects
+        the caller to the target number.
+        """
+        from app.config import settings
+
+        logger.info("Transfer action — dialling %s via Twilio REST API", target_number)
+
+        if not self._call_sid:
+            logger.error("Cannot transfer: no call_sid available")
+            return
+
+        account_sid = settings.twilio_account_sid
+        api_key_sid = settings.twilio_api_key_sid
+        api_key_secret = settings.twilio_api_key_secret
+
+        if not all([account_sid, api_key_sid, api_key_secret]):
+            logger.error("Cannot transfer: missing Twilio credentials")
+            return
+
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<Response>"
+            f"<Dial>{target_number}</Dial>"
+            "</Response>"
+        )
+
+        import httpx
+
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{self._call_sid}.json"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    data={"Twiml": twiml},
+                    auth=(api_key_sid, api_key_secret),
+                )
+                if resp.status_code < 300:
+                    logger.info("Transfer initiated to %s (status=%d)", target_number, resp.status_code)
+                else:
+                    logger.error(
+                        "Twilio transfer failed (status=%d): %s",
+                        resp.status_code,
+                        resp.text,
+                    )
+        except Exception:
+            logger.exception("Error initiating Twilio transfer to %s", target_number)

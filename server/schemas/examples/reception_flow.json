@@ -71,6 +71,25 @@
         "max_iterations": 5
       },
       "position": { "x": 550, "y": 400 }
+    },
+    {
+      "id": "end_call",
+      "type": "action",
+      "data": {
+        "action_type": "end_call",
+        "message": "Thank you for calling Smile Dental! Have a wonderful day. Goodbye!"
+      },
+      "position": { "x": 300, "y": 650 }
+    },
+    {
+      "id": "transfer_to_staff",
+      "type": "action",
+      "data": {
+        "action_type": "transfer",
+        "target_number": "+447908121095",
+        "announcement": "I'll connect you with a team member now. Please hold for just a moment."
+      },
+      "position": { "x": 550, "y": 650 }
     }
   ],
   "edges": [
@@ -105,16 +124,34 @@
       "label": "Caller changes topic — wants to ask a question or speak to someone instead"
     },
     {
+      "id": "e_booking_to_end",
+      "source": "book_appointment",
+      "target": "end_call",
+      "label": "Appointment is confirmed and the caller has no more questions"
+    },
+    {
       "id": "e_inquiry_to_router",
       "source": "general_inquiry",
       "target": "intent_router",
       "label": "Caller changes topic — wants to book an appointment or speak to someone instead"
     },
     {
+      "id": "e_inquiry_to_end",
+      "source": "general_inquiry",
+      "target": "end_call",
+      "label": "Caller's questions are answered and they have nothing else to ask"
+    },
+    {
       "id": "e_human_to_router",
       "source": "speak_to_human",
       "target": "intent_router",
       "label": "Caller changes their mind — wants to book or ask a question instead"
+    },
+    {
+      "id": "e_human_to_transfer",
+      "source": "speak_to_human",
+      "target": "transfer_to_staff",
+      "label": "Caller is ready to be connected to a staff member"
     }
   ]
 }
