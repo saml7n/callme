@@ -173,6 +173,12 @@ class CallPipeline:
         self._interrupted = False
         self._response_task: asyncio.Task[None] | None = None
 
+        # Playback duration tracking — Twilio buffers audio, so _speaking must
+        # stay True until the estimated playback finishes, not just until we
+        # finish sending chunks over the WebSocket.
+        self._playback_end: float = 0.0  # monotonic time when playback should end
+        self._speaking_off_task: asyncio.Task[None] | None = None
+
         # Workflow mode
         if engine is not None:
             self._engine: WorkflowEngine | None = engine
@@ -254,6 +260,11 @@ class CallPipeline:
 
         self._cancel_debounce()
 
+        # Cancel playback timer
+        if self._speaking_off_task is not None:
+            self._speaking_off_task.cancel()
+            self._speaking_off_task = None
+
         # Close STT and TTS clients
         await self._stt.close()
         await self._tts.close()
@@ -279,6 +290,10 @@ class CallPipeline:
             return
         self._interrupted = True
         self._speaking = False
+        self._playback_end = 0.0
+        if self._speaking_off_task is not None:
+            self._speaking_off_task.cancel()
+            self._speaking_off_task = None
         try:
             await self._ws.send_text(_build_clear_message(self._stream_sid))
             logger.info("Interruption: sent clear, discarding queued audio")
@@ -616,14 +631,21 @@ class CallPipeline:
     # ------------------------------------------------------------------
 
     async def _speak(self, text: str) -> None:
-        """Synthesize text via TTS and send audio to Twilio."""
+        """Synthesize text via TTS and send audio to Twilio.
+
+        After sending, keeps ``_speaking`` True for the estimated playback
+        duration so that interruptions are detected while Twilio is still
+        playing buffered audio.
+        """
         if self._interrupted or self._closed:
             return
         self._speaking = True
+        total_bytes = 0
         try:
             async for audio_chunk in self._tts.synthesize_stream(text):
                 if self._interrupted or self._closed:
                     break
+                total_bytes += len(audio_chunk)
                 msg = _build_outbound_media(self._stream_sid, audio_chunk)
                 await self._ws.send_text(msg)
         except asyncio.CancelledError:
@@ -632,9 +654,44 @@ class CallPipeline:
             logger.exception("Error in TTS/send for text: %s", text)
             # TTS failure — try Twilio <Say> fallback
             await self._speak_via_twilio_say(text)
-        finally:
-            if not self._interrupted:
+            self._speaking = False
+            return
+
+        if self._interrupted or self._closed:
+            return
+
+        if total_bytes > 0:
+            # Twilio buffers audio and plays it back over the phone line.
+            # Estimate when playback will actually finish so _speaking stays
+            # True until then (enabling caller interruption detection).
+            now = asyncio.get_event_loop().time()
+            audio_duration = total_bytes / 8000  # μ-law 8kHz = 8000 bytes/sec
+            playback_start = max(self._playback_end, now)
+            self._playback_end = playback_start + audio_duration
+            remaining = self._playback_end - now + 0.3  # 300ms network buffer
+            self._schedule_speaking_off(remaining)
+        else:
+            self._speaking = False
+
+    def _schedule_speaking_off(self, delay: float) -> None:
+        """Schedule ``_speaking = False`` after *delay* seconds.
+
+        Cancels any previously scheduled timer so that sequential
+        ``_speak()`` calls extend the window correctly.
+        """
+        if self._speaking_off_task is not None:
+            self._speaking_off_task.cancel()
+        self._speaking_off_task = asyncio.create_task(self._set_speaking_off(delay))
+
+    async def _set_speaking_off(self, delay: float) -> None:
+        """Background helper: wait *delay* seconds then clear ``_speaking``."""
+        try:
+            await asyncio.sleep(delay)
+            if not self._interrupted and not self._closed:
                 self._speaking = False
+                logger.debug("Playback estimation: _speaking cleared after %.1fs", delay)
+        except asyncio.CancelledError:
+            pass
 
     async def _speak_fallback(self, text: str) -> None:
         """Speak a fallback message, trying TTS first, then Twilio <Say>."""
