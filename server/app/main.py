@@ -5,8 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth import router as auth_router
 from app.api.calls import router as calls_router
 from app.api.workflows import router as workflows_router
+from app.auth import init_api_key
 from app.db.session import init_db
 from app.twilio.media_stream import router as media_stream_router
 from app.twilio.webhook import router as webhook_router
@@ -20,6 +22,18 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     init_db()
     logging.getLogger(__name__).info("Database initialised")
+
+    # Initialize API key (auto-generate if not set)
+    api_key = init_api_key()
+    logging.getLogger(__name__).info("Auth initialised (key configured: %s)", bool(api_key))
+
+    # Warm filler phrase cache (best-effort, non-blocking)
+    try:
+        from app.pipeline import warm_filler_cache
+        await warm_filler_cache()
+    except Exception:
+        logging.getLogger(__name__).warning("Failed to warm filler cache — fillers disabled")
+
     yield
 
 
@@ -28,11 +42,13 @@ app = FastAPI(title="CallMe", description="AI Receptionist Server", lifespan=lif
 # CORS — allow the Vite dev server during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
+                   "http://localhost:5174", "http://localhost:5175"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(media_stream_router)
 app.include_router(workflows_router)

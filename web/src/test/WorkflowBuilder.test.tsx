@@ -13,6 +13,14 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ReactFlowProvider } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
+// Mock the auth module so api.ts doesn't hit localStorage
+vi.mock('@/lib/auth', () => ({
+  getToken: () => null,
+  setToken: () => {},
+  clearToken: () => {},
+  isAuthenticated: () => false,
+}))
+
 // Mock ResizeObserver (React Flow needs it — must be a class/constructor)
 class MockResizeObserver {
   observe = vi.fn()

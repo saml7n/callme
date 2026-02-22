@@ -1,7 +1,7 @@
 """End-to-end voice pipeline: Twilio audio → Deepgram STT → OpenAI LLM → ElevenLabs TTS → Twilio audio.
 
-Orchestrates a single phone call with a hardcoded receptionist system prompt.
-Conversation history is maintained for the duration of the call.
+Orchestrates a single phone call with interruption handling, filler phrases,
+and error recovery.
 """
 
 from __future__ import annotations
@@ -10,12 +10,13 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from typing import Any
 
 from fastapi import WebSocket
 
 from app.llm.openai import LLMClient
-from app.stt.deepgram import DeepgramSTTClient
+from app.stt.deepgram import DeepgramConnectionError, DeepgramSTTClient
 from app.tts.elevenlabs import ElevenLabsTTSClient
 from app.db.call_logger import CallLogger
 from app.workflow.engine import ActionResult, WorkflowEngine
@@ -32,6 +33,22 @@ GREETING = "Hello! Thank you for calling. How can I help you today?"
 
 SENTENCE_ENDINGS = frozenset(".!?")
 
+# Filler phrases played when LLM takes > FILLER_THRESHOLD_MS to respond
+FILLER_PHRASES = [
+    "One moment, please.",
+    "Let me check on that.",
+    "Just a moment.",
+    "Bear with me one second.",
+    "Let me look into that for you.",
+]
+
+FILLER_THRESHOLD_MS = 800
+
+# Error fallback messages
+ERROR_MSG_HEARING = "I'm sorry, I'm having trouble hearing you. Please hold."
+ERROR_MSG_TECHNICAL = "I apologise, I'm having a technical issue. Let me transfer you."
+ERROR_MSG_GOODBYE = "I'm sorry, please call back later. Goodbye."
+
 
 def _build_outbound_media(stream_sid: str, audio: bytes) -> str:
     """Build a JSON message to send audio back to Twilio."""
@@ -42,6 +59,11 @@ def _build_outbound_media(stream_sid: str, audio: bytes) -> str:
             "media": {"payload": base64.b64encode(audio).decode("ascii")},
         }
     )
+
+
+def _build_clear_message(stream_sid: str) -> str:
+    """Build a JSON 'clear' message to stop Twilio playback immediately."""
+    return json.dumps({"event": "clear", "streamSid": stream_sid})
 
 
 def split_first_sentence(text: str) -> tuple[str, str]:
@@ -56,16 +78,63 @@ def split_first_sentence(text: str) -> tuple[str, str]:
     return "", text
 
 
+class FillerCache:
+    """Pre-synthesised filler phrases cached as μ-law audio."""
+
+    def __init__(self) -> None:
+        self._clips: list[bytes] = []
+        self._index = 0
+
+    @property
+    def ready(self) -> bool:
+        return len(self._clips) > 0
+
+    async def warm(self, tts: ElevenLabsTTSClient) -> None:
+        """Pre-generate filler audio clips. Best-effort — failures are logged."""
+        for phrase in FILLER_PHRASES:
+            try:
+                chunks: list[bytes] = []
+                async for chunk in tts.synthesize_stream(phrase):
+                    chunks.append(chunk)
+                if chunks:
+                    self._clips.append(b"".join(chunks))
+            except Exception:
+                logger.warning("Failed to pre-generate filler: %s", phrase)
+        logger.info("Filler cache warmed: %d/%d clips", len(self._clips), len(FILLER_PHRASES))
+
+    def next_clip(self) -> bytes | None:
+        if not self._clips:
+            return None
+        clip = self._clips[self._index % len(self._clips)]
+        self._index += 1
+        return clip
+
+
+# Module-level filler cache — shared across calls, warmed once
+_filler_cache = FillerCache()
+
+
+async def warm_filler_cache(tts: ElevenLabsTTSClient | None = None) -> None:
+    """Warm the filler cache at server startup."""
+    if _filler_cache.ready:
+        return
+    client = tts or ElevenLabsTTSClient()
+    try:
+        await _filler_cache.warm(client)
+    finally:
+        if tts is None:
+            await client.close()
+
+
 class CallPipeline:
     """Orchestrates a single call through the STT → LLM → TTS pipeline.
 
-    Usage::
-
-        pipeline = CallPipeline(ws=websocket, stream_sid="MZ...")
-        await pipeline.start()          # connects STT, sends greeting
-        await pipeline.send_audio(chunk) # called per Twilio media event
-        ...
-        await pipeline.close()           # cleanup on hang-up / stop
+    Features:
+    - **Interruption handling:** Sends Twilio `clear` when caller speaks during
+      TTS playback, discards queued audio.
+    - **Filler phrases:** Plays a pre-cached filler if the LLM takes > 800ms.
+    - **Error recovery:** STT reconnect (1 retry), LLM/TTS fallback messages,
+      transfer to fallback number on unrecoverable errors.
     """
 
     def __init__(
@@ -99,7 +168,12 @@ class CallPipeline:
         self._final_debounce_task: asyncio.Task[None] | None = None
         self._closed = False
 
-        # Workflow mode: if a workflow dict or engine is provided, delegate to it
+        # Interruption tracking
+        self._speaking = False
+        self._interrupted = False
+        self._response_task: asyncio.Task[None] | None = None
+
+        # Workflow mode
         if engine is not None:
             self._engine: WorkflowEngine | None = engine
         elif workflow is not None:
@@ -125,7 +199,6 @@ class CallPipeline:
         if self._engine is not None:
             result = await self._engine.start()
             if isinstance(result, ActionResult):
-                # Action node as greeting (unusual but possible)
                 await self._speak(result.message)
                 self._messages.append({"role": "assistant", "content": result.message})
                 if result.call_ended:
@@ -157,13 +230,28 @@ class CallPipeline:
             return
         self._closed = True
 
-        # Cancel the transcript processing task
-        if self._transcript_task is not None:
-            self._transcript_task.cancel()
-            try:
-                await self._transcript_task
-            except asyncio.CancelledError:
-                pass
+        # Determine whether we're being called from one of our own tasks
+        # (e.g. _handle_end_call inside _response_task). In that case we
+        # must NOT await the tasks — they reference each other and create
+        # a circular await chain that overflows the stack.
+        current = asyncio.current_task()
+        own_tasks = {self._transcript_task, self._response_task}
+        called_internally = current in own_tasks
+
+        # Always request cancellation
+        for task in [self._transcript_task, self._response_task]:
+            if task is not None and task is not current:
+                task.cancel()
+
+        # Only await when called from the outside (media_stream.py, tests, …)
+        if not called_internally:
+            for task in [self._transcript_task, self._response_task]:
+                if task is not None:
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
         self._cancel_debounce()
 
         # Close STT and TTS clients
@@ -178,49 +266,102 @@ class CallPipeline:
         logger.info("Pipeline closed — %d messages in history", len(self._messages))
 
     # ------------------------------------------------------------------
-    # Internal
+    # Interruption
+    # ------------------------------------------------------------------
+
+    async def _interrupt(self) -> None:
+        """Interrupt current TTS playback.
+
+        Sends a Twilio `clear` message to stop audio immediately and
+        sets the interrupted flag so the response generator stops.
+        """
+        if not self._speaking:
+            return
+        self._interrupted = True
+        try:
+            await self._ws.send_text(_build_clear_message(self._stream_sid))
+            logger.info("Interruption: sent clear, discarding queued audio")
+        except Exception:
+            logger.warning("Failed to send clear message")
+
+        # Cancel the response generation task if running
+        if self._response_task is not None:
+            self._response_task.cancel()
+            try:
+                await self._response_task
+            except asyncio.CancelledError:
+                pass
+            self._response_task = None
+
+    # ------------------------------------------------------------------
+    # Transcript processing
     # ------------------------------------------------------------------
 
     async def _process_transcripts(self) -> None:
         """Background loop: listen for transcript events and generate responses.
 
         Triggers on speech_final immediately. If only is_final events arrive
-        (speech_final missing), a 0.7s debounce timer fires as a fallback.
+        (speech_final missing), a 0.3s debounce timer fires as a fallback.
+        Handles Deepgram disconnects with 1 retry.
         """
         try:
-            async for event in self._stt.receive_transcripts():
-                if event.transcript:
-                    if event.speech_final:
-                        # Cancel any pending is_final debounce
-                        self._cancel_debounce()
-                        logger.info(
-                            "Caller [SPEECH_FINAL] (conf=%.2f): %s",
-                            event.confidence,
-                            event.transcript,
-                        )
-                        await self._handle_caller_utterance(event.transcript)
-                    elif event.is_final:
-                        logger.info(
-                            "Caller [FINAL] (conf=%.2f): %s",
-                            event.confidence,
-                            event.transcript,
-                        )
-                        # Start/reset debounce timer — if speech_final doesn't
-                        # arrive within 0.3s, treat this is_final as the utterance.
-                        self._cancel_debounce()
-                        transcript = event.transcript
-                        self._final_debounce_task = asyncio.create_task(
-                            self._debounced_handle(transcript, delay=0.3)
-                        )
-                    else:
-                        logger.debug(
-                            "Caller [interim]: %s",
-                            event.transcript,
-                        )
+            await self._receive_transcripts_with_reconnect()
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Error in transcript processing loop")
+
+    async def _receive_transcripts_with_reconnect(self) -> None:
+        """Receive transcripts with one reconnection attempt on disconnect."""
+        retries = 0
+        while not self._closed:
+            try:
+                async for event in self._stt.receive_transcripts():
+                    if event.transcript:
+                        if event.speech_final:
+                            self._cancel_debounce()
+                            # Interrupt if AI is currently speaking
+                            if self._speaking:
+                                await self._interrupt()
+                            logger.info(
+                                "Caller [SPEECH_FINAL] (conf=%.2f): %s",
+                                event.confidence,
+                                event.transcript,
+                            )
+                            await self._handle_caller_utterance(event.transcript)
+                        elif event.is_final:
+                            logger.info(
+                                "Caller [FINAL] (conf=%.2f): %s",
+                                event.confidence,
+                                event.transcript,
+                            )
+                            self._cancel_debounce()
+                            transcript = event.transcript
+                            self._final_debounce_task = asyncio.create_task(
+                                self._debounced_handle(transcript, delay=0.3)
+                            )
+                        else:
+                            # Interim result — interrupt if the caller starts talking
+                            if self._speaking and event.transcript.strip():
+                                await self._interrupt()
+                            logger.debug("Caller [interim]: %s", event.transcript)
+                # Normal end of generator — STT connection closed cleanly
+                break
+            except DeepgramConnectionError:
+                if retries >= 1 or self._closed:
+                    logger.error("Deepgram disconnected — retry exhausted, speaking fallback")
+                    await self._speak_fallback(ERROR_MSG_HEARING)
+                    break
+                retries += 1
+                logger.warning("Deepgram disconnected — attempting reconnect (%d/1)", retries)
+                try:
+                    self._stt = DeepgramSTTClient()
+                    await self._stt.connect()
+                    logger.info("Deepgram reconnected successfully")
+                except Exception:
+                    logger.error("Deepgram reconnect failed — speaking fallback")
+                    await self._speak_fallback(ERROR_MSG_HEARING)
+                    break
 
     def _cancel_debounce(self) -> None:
         """Cancel any pending is_final debounce timer."""
@@ -233,9 +374,11 @@ class CallPipeline:
         try:
             await asyncio.sleep(delay)
             logger.info("Debounce fired (no speech_final) — treating as utterance: %s", transcript)
+            if self._speaking:
+                await self._interrupt()
             await self._handle_caller_utterance(transcript)
         except asyncio.CancelledError:
-            pass  # speech_final arrived in time, or pipeline closed
+            pass
 
     async def _handle_caller_utterance(self, transcript: str) -> None:
         """Process a complete caller utterance through LLM/engine."""
@@ -243,23 +386,66 @@ class CallPipeline:
         if self._call_logger:
             self._call_logger.log_transcript(transcript)
             self._call_logger.flush()
-        if self._engine is not None:
-            await self._generate_engine_response(transcript)
-        else:
-            await self._generate_response()
 
-    async def _generate_response(self) -> None:
-        """Stream an LLM response, split into sentences, and TTS each."""
-        buffer = ""
-        full_response = ""
+        # Generate response in a cancellable task (for interruption)
+        if self._engine is not None:
+            self._response_task = asyncio.create_task(
+                self._generate_engine_response(transcript)
+            )
+        else:
+            self._response_task = asyncio.create_task(self._generate_response())
 
         try:
+            await self._response_task
+        except asyncio.CancelledError:
+            logger.info("Response generation interrupted by caller")
+        finally:
+            self._response_task = None
+
+    # ------------------------------------------------------------------
+    # Response generation
+    # ------------------------------------------------------------------
+
+    async def _generate_response(self) -> None:
+        """Stream an LLM response, split into sentences, and TTS each.
+
+        Includes filler phrase support and error recovery.
+        """
+        buffer = ""
+        full_response = ""
+        self._interrupted = False
+        first_token_received = False
+        filler_task: asyncio.Task[None] | None = None
+
+        try:
+            # Start filler timer
+            if _filler_cache.ready:
+                filler_task = asyncio.create_task(self._play_filler_after_delay())
+
             async for chunk in self._llm.chat_stream(self._messages):
+                if self._interrupted:
+                    break
+
+                # Cancel filler on first token
+                if not first_token_received:
+                    first_token_received = True
+                    if filler_task is not None:
+                        filler_task.cancel()
+                        try:
+                            await filler_task
+                        except asyncio.CancelledError:
+                            pass
+                        filler_task = None
+                    # If filler was playing, clear it
+                    if self._speaking:
+                        await self._interrupt()
+                        self._interrupted = False  # Reset — we want to speak the real response
+
                 buffer += chunk
                 full_response += chunk
 
                 # Eagerly send complete sentences
-                while True:
+                while not self._interrupted:
                     sentence, remainder = split_first_sentence(buffer)
                     if not sentence:
                         break
@@ -267,11 +453,16 @@ class CallPipeline:
                     logger.info("LLM sentence → TTS: %s", sentence)
                     await self._speak(sentence)
 
+            # Cancel filler if LLM returned empty
+            if filler_task is not None:
+                filler_task.cancel()
+
             # Flush any remaining text
-            leftover = buffer.strip()
-            if leftover:
-                logger.info("LLM remainder → TTS: %s", leftover)
-                await self._speak(leftover)
+            if not self._interrupted:
+                leftover = buffer.strip()
+                if leftover:
+                    logger.info("LLM remainder → TTS: %s", leftover)
+                    await self._speak(leftover)
 
             # Add the complete response to conversation history
             if full_response.strip():
@@ -281,17 +472,25 @@ class CallPipeline:
                     self._call_logger.log_llm_response(full_response.strip())
                     self._call_logger.flush()
 
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("Error generating LLM response")
             if self._call_logger:
                 self._call_logger.log_error("LLM response generation failed")
                 self._call_logger.flush()
+            await self._handle_llm_failure()
 
     async def _generate_engine_response(self, transcript: str) -> None:
         """Get a response from the WorkflowEngine and speak it."""
+        self._interrupted = False
+
         try:
             assert self._engine is not None
             response, call_ended = await self._engine.handle_input(transcript)
+
+            if self._interrupted:
+                return
 
             # Handle action result
             if isinstance(response, ActionResult):
@@ -313,38 +512,149 @@ class CallPipeline:
 
             # Normal conversation response
             response_text = response
-            if response_text:
+            if response_text and not self._interrupted:
                 logger.info("Engine response: %s", response_text)
-                # Split into sentences for low-latency TTS
                 remaining = response_text
-                while True:
+                while not self._interrupted:
                     sentence, remaining = split_first_sentence(remaining)
                     if not sentence:
                         break
                     logger.info("Engine sentence → TTS: %s", sentence)
                     await self._speak(sentence)
-                leftover = remaining.strip()
-                if leftover:
-                    logger.info("Engine remainder → TTS: %s", leftover)
-                    await self._speak(leftover)
+                if not self._interrupted:
+                    leftover = remaining.strip()
+                    if leftover:
+                        logger.info("Engine remainder → TTS: %s", leftover)
+                        await self._speak(leftover)
                 self._messages.append({"role": "assistant", "content": response_text})
                 if self._call_logger:
                     self._call_logger.log_llm_response(response_text)
                     self._call_logger.flush()
+
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("Error generating engine response")
             if self._call_logger:
                 self._call_logger.log_error("Engine response generation failed")
                 self._call_logger.flush()
+            await self._handle_llm_failure()
+
+    # ------------------------------------------------------------------
+    # Filler phrases
+    # ------------------------------------------------------------------
+
+    async def _play_filler_after_delay(self) -> None:
+        """Wait FILLER_THRESHOLD_MS, then play a cached filler clip."""
+        try:
+            await asyncio.sleep(FILLER_THRESHOLD_MS / 1000)
+            clip = _filler_cache.next_clip()
+            if clip and not self._interrupted and not self._closed:
+                logger.info("Playing filler phrase (LLM latency > %dms)", FILLER_THRESHOLD_MS)
+                self._speaking = True
+                msg = _build_outbound_media(self._stream_sid, clip)
+                await self._ws.send_text(msg)
+                # Don't set _speaking = False here — the real response will interrupt it
+        except asyncio.CancelledError:
+            pass  # LLM responded in time
+
+    # ------------------------------------------------------------------
+    # Audio output
+    # ------------------------------------------------------------------
 
     async def _speak(self, text: str) -> None:
         """Synthesize text via TTS and send audio to Twilio."""
+        if self._interrupted or self._closed:
+            return
+        self._speaking = True
         try:
+            async for audio_chunk in self._tts.synthesize_stream(text):
+                if self._interrupted or self._closed:
+                    break
+                msg = _build_outbound_media(self._stream_sid, audio_chunk)
+                await self._ws.send_text(msg)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Error in TTS/send for text: %s", text)
+            # TTS failure — try Twilio <Say> fallback
+            await self._speak_via_twilio_say(text)
+        finally:
+            if not self._interrupted:
+                self._speaking = False
+
+    async def _speak_fallback(self, text: str) -> None:
+        """Speak a fallback message, trying TTS first, then Twilio <Say>."""
+        try:
+            self._speaking = True
             async for audio_chunk in self._tts.synthesize_stream(text):
                 msg = _build_outbound_media(self._stream_sid, audio_chunk)
                 await self._ws.send_text(msg)
+            self._speaking = False
         except Exception:
-            logger.exception("Error in TTS/send for text: %s", text)
+            logger.warning("TTS fallback failed, trying Twilio <Say>")
+            await self._speak_via_twilio_say(text)
+            self._speaking = False
+
+    async def _speak_via_twilio_say(self, text: str) -> None:
+        """Fall back to Twilio REST API <Say> when TTS is unavailable."""
+        from app.config import settings
+
+        if not self._call_sid:
+            logger.error("Cannot use Twilio <Say>: no call_sid")
+            return
+
+        account_sid = settings.twilio_account_sid
+        api_key_sid = settings.twilio_api_key_sid
+        api_key_secret = settings.twilio_api_key_secret
+
+        if not all([account_sid, api_key_sid, api_key_secret]):
+            logger.error("Cannot use Twilio <Say>: missing credentials")
+            return
+
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<Response>"
+            f"<Say>{text}</Say>"
+            "</Response>"
+        )
+
+        import httpx
+
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{self._call_sid}.json"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    data={"Twiml": twiml},
+                    auth=(api_key_sid, api_key_secret),
+                )
+                if resp.status_code < 300:
+                    logger.info("Twilio <Say> fallback succeeded for: %s", text)
+                else:
+                    logger.error("Twilio <Say> fallback failed (status=%d): %s", resp.status_code, resp.text)
+        except Exception:
+            logger.exception("Failed to use Twilio <Say> fallback")
+
+    # ------------------------------------------------------------------
+    # Error recovery
+    # ------------------------------------------------------------------
+
+    async def _handle_llm_failure(self) -> None:
+        """Handle an unrecoverable LLM error: speak message + transfer or end call."""
+        from app.config import settings
+
+        fallback = settings.callme_fallback_number
+        if fallback:
+            await self._speak_fallback(ERROR_MSG_TECHNICAL)
+            await self._handle_transfer(fallback)
+        else:
+            await self._speak_fallback(ERROR_MSG_GOODBYE)
+            await self._handle_end_call()
+
+    # ------------------------------------------------------------------
+    # Call control
+    # ------------------------------------------------------------------
 
     async def _handle_end_call(self) -> None:
         """End the call gracefully after speaking the closing message."""
@@ -352,11 +662,7 @@ class CallPipeline:
         await self.close()
 
     async def _handle_transfer(self, target_number: str) -> None:
-        """Transfer the call to another number via Twilio REST API.
-
-        Updates the live call with <Dial> TwiML so Twilio connects
-        the caller to the target number.
-        """
+        """Transfer the call to another number via Twilio REST API."""
         from app.config import settings
 
         logger.info("Transfer action — dialling %s via Twilio REST API", target_number)

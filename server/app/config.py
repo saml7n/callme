@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_api_key_sid: str = ""
     twilio_api_key_secret: str = ""
+    twilio_auth_token: str = ""  # For signature validation on /twilio/incoming
     twilio_phone_number: str = ""
 
     # Deepgram
@@ -24,6 +25,12 @@ class Settings(BaseSettings):
     port: int = 3000
     public_url: str = ""
     database_url: str = "sqlite:///./callme.db"
+
+    # Auth — API key for dashboard + API access
+    callme_api_key: str = ""
+
+    # Fallback transfer number for unrecoverable errors mid-call
+    callme_fallback_number: str = ""
 
     model_config = {"env_file": "../.env", "env_file_encoding": "utf-8"}
 

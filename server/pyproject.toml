@@ -10,7 +10,9 @@ dependencies = [
     "openai>=2.21.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
+    "python-multipart>=0.0.22",
     "sqlmodel>=0.0.34",
+    "twilio>=9.10.2",
     "uvicorn[standard]>=0.41.0",
     "websockets>=16.0",
 ]

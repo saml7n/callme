@@ -1,8 +1,44 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { clearToken } from './lib/auth'
+import { api } from './lib/api'
 
 function App() {
+  const navigate = useNavigate()
+  const [warnings, setWarnings] = useState<string[]>([])
+
+  useEffect(() => {
+    api.auth.configWarnings()
+      .then((res) => setWarnings(res.warnings))
+      .catch(() => {})
+  }, [])
+
+  const handleLogout = () => {
+    clearToken()
+    navigate('/login')
+  }
+
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center relative">
+      <button
+        onClick={handleLogout}
+        className="absolute top-4 right-4 text-gray-500 hover:text-gray-300 text-sm transition"
+      >
+        Sign Out
+      </button>
+
+      {warnings.length > 0 && (
+        <div className="absolute top-4 left-4 right-24 space-y-2">
+          {warnings.map((w, i) => (
+            <div
+              key={i}
+              className="bg-yellow-900/40 border border-yellow-700/50 text-yellow-300 text-xs px-3 py-2 rounded-lg"
+            >
+              ⚠ {w}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="text-center">
         <h1 className="text-4xl font-bold text-white mb-2">
           CallMe

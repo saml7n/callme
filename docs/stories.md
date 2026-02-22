@@ -640,17 +640,17 @@ As an **admin**, I want **a drag-and-drop visual editor for designing call workf
 As an **admin**, I want **a list of past calls with drill-down into full transcripts and workflow paths**, so that **I can review how the AI handled each caller**.
 
 ### Acceptance criteria
-- [ ] A page at `/calls` shows a table of recent calls:
+- [x] A page at `/calls` shows a table of recent calls:
   - Columns: date/time, caller number (masked: `+44 *** *** 1234`), duration, workflow name, status (completed / transferred / error).
   - Sorted by most recent first. Pagination or infinite scroll.
-- [ ] Clicking a row navigates to `/calls/{id}` showing:
+- [x] Clicking a row navigates to `/calls/{id}` showing:
   - Call metadata (date, duration, caller number, workflow name).
   - Full transcript as a chat-style timeline (caller on the left, AI on the right).
   - Workflow path: which nodes were visited, in order (breadcrumb or mini flow diagram with visited nodes highlighted).
   - Node summaries displayed at each transition point in the timeline.
   - Extracted key info shown as key-value badges.
   - Errors or transfers noted inline.
-- [ ] Data from `GET /api/calls` and `GET /api/calls/{id}` (Story 10).
+- [x] Data from `GET /api/calls` and `GET /api/calls/{id}` (Story 10).
 
 ### Unit tests (Vitest + React Testing Library)
 - Call list: renders rows from mock data; phone number is masked; columns correct.
@@ -683,27 +683,27 @@ As a **demo presenter**, I want **the system to feel polished — handling inter
 ### Acceptance criteria
 
 #### Interruption handling
-- [ ] When the caller speaks while TTS audio is playing:
+- [x] When the caller speaks while TTS audio is playing:
   1. Immediately send a `clear` message on the Twilio WebSocket to stop playback.
   2. Discard any queued TTS audio for the interrupted response.
   3. Process the new caller input normally.
-- [ ] The system does not "talk over" the caller for more than ~500ms.
+- [x] The system does not "talk over" the caller for more than ~500ms.
 
 #### Filler phrases
-- [ ] If the LLM takes > 800ms to start producing tokens, the pipeline plays a pre-synthesised filler phrase (*"One moment, please"*, *"Let me check on that"*, etc.).
-- [ ] Filler audio is pre-generated at server startup (3-5 variants) and cached.
-- [ ] Filler is interrupted as soon as the real LLM response audio is ready.
+- [x] If the LLM takes > 800ms to start producing tokens, the pipeline plays a pre-synthesised filler phrase (*"One moment, please"*, *"Let me check on that"*, etc.).
+- [x] Filler audio is pre-generated at server startup (3-5 variants) and cached.
+- [x] Filler is interrupted as soon as the real LLM response audio is ready.
 
 #### Error handling
-- [ ] Deepgram disconnect mid-call → attempt reconnection (1 retry); on failure, speak *"I'm sorry, I'm having trouble hearing you. Please hold."*
-- [ ] LLM failure → speak *"I apologise, I'm having a technical issue. Let me transfer you."* → trigger transfer to fallback number.
-- [ ] ElevenLabs failure → fall back to Twilio `<Say>` for the error message.
-- [ ] No unhandled exceptions crash the server or drop the WebSocket.
+- [x] Deepgram disconnect mid-call → attempt reconnection (1 retry); on failure, speak *"I'm sorry, I'm having trouble hearing you. Please hold."*
+- [x] LLM failure → speak *"I apologise, I'm having a technical issue. Let me transfer you."* → trigger transfer to fallback number.
+- [x] ElevenLabs failure → fall back to Twilio `<Say>` for the error message.
+- [x] No unhandled exceptions crash the server or drop the WebSocket.
 
 #### Basic auth
-- [ ] Web dashboard requires login (simple shared secret or email/password).
-- [ ] API endpoints under `/api/` require a Bearer token or session cookie.
-- [ ] `/twilio/incoming` does **not** require auth but validates `X-Twilio-Signature`.
+- [x] Web dashboard requires login (simple shared secret or email/password).
+- [x] API endpoints under `/api/` require a Bearer token or session cookie.
+- [x] `/twilio/incoming` does **not** require auth but validates `X-Twilio-Signature`.
 
 ### Unit tests
 - **Interruption:** STT emits `speech_final` while TTS is playing → `clear` sent, queue flushed.
@@ -727,9 +727,9 @@ As a **demo presenter**, I want **the system to feel polished — handling inter
 3. Filler phrase voice: same ElevenLabs voice as the active workflow, or pre-recorded neutral?
 
 **Recorded answers:**
-- Auth approach: _unanswered_
-- Fallback number: _unanswered_
-- Filler voice: _unanswered_
+- Auth approach: API key via `CALLME_API_KEY` env var. Auto-generated on first run if not set. Dashboard has a single-field login page (password = API key). API uses `Authorization: Bearer <key>`. No users table — keeps it simple and white-label-ready.
+- Fallback number: `CALLME_FALLBACK_NUMBER` env var. If not set, AI says "I'm sorry, please call back later" and ends the call. Dashboard settings page shows a warning if no fallback number is configured.
+- Filler voice: Same ElevenLabs voice as the active workflow. Pre-generate 3–5 filler phrases at server startup using the configured voice ID. Cache as μ-law audio. Regenerate if voice changes.
 
 ---
 

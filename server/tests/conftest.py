@@ -11,9 +11,13 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.db.session as session_mod
 import app.db.call_logger as call_logger_mod
+from app.auth import require_auth
 from app.db.models import Call, CallEvent, EventType, Workflow
 from app.db.session import get_session as _original_get_session
 from app.main import app
+
+# Fixed test API key
+TEST_API_KEY = "test-api-key-for-tests"
 
 
 def _minimal_graph() -> dict[str, Any]:
@@ -62,6 +66,7 @@ def reception_flow() -> dict[str, Any]:
 def db_session() -> Generator[Session, None, None]:
     """Create an in-memory SQLite database for each test.
 
+    Also disables auth for API tests so they don't need a token.
     Patches ``get_session`` everywhere it was imported:
     - ``app.db.session`` module (canonical)
     - ``app.db.call_logger`` module (imported directly)
@@ -77,6 +82,10 @@ def db_session() -> Generator[Session, None, None]:
         with Session(engine) as s:
             yield s
 
+    # Disable auth for API tests by default
+    async def _no_auth() -> str:
+        return TEST_API_KEY
+
     # Monkey-patch at every import site
     original_session = session_mod.get_session
     original_call_logger = call_logger_mod.get_session
@@ -85,6 +94,7 @@ def db_session() -> Generator[Session, None, None]:
 
     # FastAPI dependency override for endpoints using Depends(get_session)
     app.dependency_overrides[_original_get_session] = _override
+    app.dependency_overrides[require_auth] = _no_auth
 
     with Session(engine) as session:
         yield session
@@ -93,3 +103,4 @@ def db_session() -> Generator[Session, None, None]:
     session_mod.get_session = original_session
     call_logger_mod.get_session = original_call_logger
     app.dependency_overrides.pop(_original_get_session, None)
+    app.dependency_overrides.pop(require_auth, None)

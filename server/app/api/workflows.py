@@ -15,13 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from app.auth import require_auth
 from app.db.models import Workflow
 from app.db.session import get_session
 from app.workflow.schema import Workflow as WorkflowSchema
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+router = APIRouter(prefix="/api/workflows", tags=["workflows"], dependencies=[Depends(require_auth)])
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,17 @@
-"""Twilio incoming-call webhook — returns TwiML to open a bidirectional media stream."""
+"""Twilio incoming-call webhook — returns TwiML to open a bidirectional media stream.
 
-from fastapi import APIRouter, Request
+Validates the X-Twilio-Signature header when twilio_auth_token is configured.
+"""
+
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
+from twilio.request_validator import RequestValidator
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/twilio", tags=["twilio"])
 
@@ -20,6 +28,20 @@ def build_twiml(stream_url: str) -> str:
     )
 
 
+def validate_twilio_signature(request_url: str, params: dict, signature: str) -> bool:
+    """Validate X-Twilio-Signature using the configured auth token.
+
+    Returns True if validation passes or if no auth token is configured
+    (skip validation in development).
+    """
+    auth_token = settings.twilio_auth_token
+    if not auth_token:
+        logger.debug("No twilio_auth_token configured — skipping signature validation")
+        return True
+    validator = RequestValidator(auth_token)
+    return validator.validate(request_url, params, signature)
+
+
 @router.post("/incoming")
 async def incoming_call(request: Request) -> Response:
     """Handle an inbound Twilio call.
@@ -27,6 +49,15 @@ async def incoming_call(request: Request) -> Response:
     Returns TwiML instructing Twilio to open a bidirectional media stream
     back to our WebSocket endpoint.
     """
+    # Validate Twilio signature
+    signature = request.headers.get("X-Twilio-Signature", "")
+    form_data = dict(await request.form())
+    request_url = str(request.url)
+
+    if not validate_twilio_signature(request_url, form_data, signature):
+        logger.warning("Invalid Twilio signature on /twilio/incoming")
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
     public_url = settings.public_url.rstrip("/")
     # Convert http(s) to ws(s) for the WebSocket URL
     ws_url = public_url.replace("https://", "wss://").replace("http://", "ws://")

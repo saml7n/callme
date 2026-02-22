@@ -7,17 +7,35 @@ import type {
   WorkflowGraph,
   WorkflowListItem,
 } from './types'
+import { getToken } from './auth'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string>),
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   })
+
+  // If 401/403, clear stored token so user gets redirected to login
+  if (res.status === 401 || res.status === 403) {
+    const { clearToken } = await import('./auth')
+    clearToken()
+    // Only redirect if we're in a browser context
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login'
+    }
+  }
+
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`${res.status}: ${body}`)
@@ -27,6 +45,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  auth: {
+    login: (key: string) =>
+      request<{ ok: boolean; token: string }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ key }),
+      }),
+    check: () => request<{ auth_enabled: boolean }>('/api/auth/check'),
+    configWarnings: () => request<{ warnings: string[] }>('/api/auth/config-warnings'),
+  },
+
   workflows: {
     list: () => request<WorkflowListItem[]>('/api/workflows'),
 

@@ -14,12 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app.auth import require_auth
 from app.db.models import Call, CallEvent, Workflow
 from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/calls", tags=["calls"])
+router = APIRouter(prefix="/api/calls", tags=["calls"], dependencies=[Depends(require_auth)])
 
 
 # ---------------------------------------------------------------------------
