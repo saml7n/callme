@@ -80,6 +80,10 @@ CallMe is an AI-powered phone receptionist. The architecture is documented in `d
 ### E) Commit
 - Ensure working tree is clean except for intended changes.
 - Create exactly one commit for the story.
+- **Always commit at the end of every completed story** — do not leave uncommitted work.
+- Commit message: `story-<N>: <short title>` (e.g. `story-7: workflow engine with conversation nodes`).
+- The commit must include all code, tests, story doc updates, and any config changes.
+- After committing, verify the commit with `git log --oneline -1`.
 
 ### F) Close out
 - Update `docs/stories.md` with completion evidence, test results, and commit hash.

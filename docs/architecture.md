@@ -124,137 +124,178 @@ Twilio plays audio to caller
 
 ## 4. Workflow System Design
 
-### 4.1 Node Types (PoC scope — keep it minimal)
+### 4.1 Node Types
 
-| Node Type | Purpose | Config |
-|---|---|---|
-| **Greeting** | Entry point; plays an opening message | `message` (text to speak), `voice_id` |
-| **Collect Info** | Ask the caller a question and extract structured data (slot-filling) | `prompt`, `slots[]` (name, type, required), `retry_message` |
-| **LLM Conversation** | Free-form conversation guided by a system prompt | `system_prompt`, `max_turns` |
-| **API Call** | Hit an external HTTP endpoint with collected data | `url`, `method`, `headers`, `body_template`, `success_edge`, `failure_edge` |
-| **Transfer** | Warm- or cold-transfer to a human phone number | `target_number`, `announcement_message` |
-| **End Call** | Say a closing message and hang up | `message` |
+Three node types, built incrementally across stories:
 
-### 4.2 Graph Format (JSON)
+| Node Type | Purpose | Config | Built in |
+|---|---|---|---|
+| **Conversation** | Talks to the caller following plain-English instructions. Maintains its own chat history. A Router LLM decides each turn whether to STAY or transition. | `instructions` (str), `examples` (list), `max_iterations` (int) | Story 7 |
+| **Decision** | Pure routing — no conversation with the caller. Evaluates accumulated context and picks an outgoing edge. | `instruction` (str) | Story 8 |
+| **Action** | Performs a side effect (end call, transfer, etc.). Extensible — new action types added over time. | `action_type` (str) + type-specific fields | Story 9 |
 
-Workflows are stored as a JSON document with two top-level arrays — `nodes` and `edges`:
+### 4.2 Two LLM Roles Per Turn
+
+Every conversation turn uses two LLM calls:
+
+1. **Router LLM** (cheap/fast, e.g. GPT-4o-mini): Sees the current node, outgoing edge labels (plain English), and conversation history. Returns `STAY` or the ID of the edge to follow. **One call replaces all edge condition evaluation.**
+2. **Responder LLM** (GPT-4o): Sees the current node's `instructions`, `examples`, accumulated summaries from previous nodes, and the current node's chat history. Generates the natural language reply.
+
+Decision nodes use only the Router LLM. Action nodes use neither (they execute side effects directly).
+
+### 4.3 Per-Node Chat History & Context Passing
+
+Each conversation node maintains its **own `messages[]`** array — separate from other nodes. When transitioning:
+1. A summary of the outgoing node's conversation is generated via LLM.
+2. Key information is extracted (names, dates, intents, etc.).
+3. The next node receives accumulated `NodeSummary` objects as context prefix.
+
+This keeps per-node LLM context focused and avoids bloat across long multi-node calls.
+
+### 4.4 Graph Format (JSON)
+
+Workflows are stored as a JSON document with `nodes` and `edges`:
 
 ```json
 {
   "id": "wf_001",
-  "name": "General Reception",
+  "name": "Dental Reception",
+  "version": 1,
+  "entry_node_id": "node_1",
   "nodes": [
     {
       "id": "node_1",
-      "type": "greeting",
+      "type": "conversation",
       "data": {
-        "message": "Hello, thanks for calling Acme Corp. How can I help you today?"
+        "instructions": "You are a friendly receptionist for Smile Dental. Greet the caller warmly and ask how you can help today.",
+        "examples": [
+          { "role": "user", "content": "Hi, I'd like to book a cleaning" },
+          { "role": "assistant", "content": "Of course! I'd be happy to help. Could I get your name first?" }
+        ],
+        "max_iterations": 5
       },
       "position": { "x": 100, "y": 100 }
     },
     {
       "id": "node_2",
-      "type": "collect_info",
+      "type": "decision",
       "data": {
-        "prompt": "Can I get your name and the reason for your call?",
-        "slots": [
-          { "name": "caller_name", "type": "string", "required": true },
-          { "name": "reason", "type": "string", "required": true }
-        ]
+        "instruction": "Determine the caller's primary intent."
       },
       "position": { "x": 100, "y": 250 }
+    },
+    {
+      "id": "node_3",
+      "type": "conversation",
+      "data": {
+        "instructions": "Help the caller book a dental appointment. Ask for preferred date, time, and service type.",
+        "examples": [],
+        "max_iterations": 10
+      },
+      "position": { "x": -100, "y": 400 }
+    },
+    {
+      "id": "node_4",
+      "type": "action",
+      "data": {
+        "action_type": "transfer",
+        "target_number": "+441234567890",
+        "announcement": "I'll connect you with our team now. One moment please."
+      },
+      "position": { "x": 300, "y": 400 }
+    },
+    {
+      "id": "node_5",
+      "type": "action",
+      "data": {
+        "action_type": "end_call",
+        "message": "Thank you for calling Smile Dental! Goodbye!"
+      },
+      "position": { "x": -100, "y": 550 }
     }
   ],
   "edges": [
-    {
-      "id": "edge_1",
-      "source": "node_1",
-      "target": "node_2",
-      "condition": null
-    },
-    {
-      "id": "edge_2",
-      "source": "node_2",
-      "target": "node_3",
-      "condition": { "type": "llm", "prompt": "The caller wants to schedule an appointment" }
-    },
-    {
-      "id": "edge_3",
-      "source": "node_2",
-      "target": "node_4",
-      "condition": { "type": "llm", "prompt": "The caller wants to speak to a person" }
-    }
+    { "id": "e1", "source": "node_1", "target": "node_2", "label": "Caller has stated their need" },
+    { "id": "e2", "source": "node_2", "target": "node_3", "label": "Caller wants to book an appointment" },
+    { "id": "e3", "source": "node_2", "target": "node_4", "label": "Caller wants to speak to a person" },
+    { "id": "e4", "source": "node_3", "target": "node_5", "label": "Appointment details confirmed" }
   ]
 }
 ```
 
-### 4.3 Edge Conditions
+### 4.5 Edge Labels (replacing typed conditions)
 
-| Type | Evaluation | Use case |
-|---|---|---|
-| `null` / unconditional | Always follows this edge (only one allowed per source) | Greeting → next step |
-| `expression` | Python expression evaluated against collected slot data | `slots["reason"] == "billing"` |
-| `llm` | Natural-language condition evaluated by LLM against conversation context | "The caller wants to schedule an appointment" |
+Edges have a plain-English `label` describing when to follow them. The Router LLM interprets these against conversation context — no expression evaluator or per-edge LLM calls needed.
 
-### 4.4 Workflow Engine (State Machine)
+| Old approach (removed) | New approach |
+|---|---|
+| `condition: null` (unconditional) | Edge with a descriptive label; Router picks it when appropriate |
+| `condition: { type: "expression", expr: "..." }` | Not needed — Router LLM handles routing |
+| `condition: { type: "llm", prompt: "..." }` | Edge `label` serves same purpose; Router evaluates all edges in one call |
+
+### 4.6 Workflow Engine (State Machine)
 
 ```python
 class WorkflowEngine:
     workflow: Graph
     current_node: Node
-    context: CallContext  # slots: dict, transcript: list, turn_count: int
+    node_histories: dict[str, list[dict]]  # per-node chat histories
+    summaries: list[NodeSummary]           # accumulated across transitions
 
-    async def advance(self, event: Event) -> Action:
-        # 1. Evaluate all outgoing edges from current_node
-        # 2. Pick the first edge whose condition is satisfied
-        # 3. Transition to the target node
-        # 4. Execute the new node's entry action
-        #    (speak greeting, ask question, fire API, etc.)
-        ...
+    async def start() -> str:
+        # Enter entry node, generate initial response via Responder LLM
+
+    async def handle_input(transcript: str) -> tuple[str, bool]:
+        # 1. Append transcript to current node's chat history
+        # 2. Router LLM: STAY or follow edge?
+        # 3a. STAY → Responder LLM generates reply from node instructions + chat history
+        # 3b. TRANSITION → summarise current node, carry forward, enter new node
+        # 4. Check max_iterations → force transition if exceeded
+        # Returns (response_text, call_ended)
 ```
 
 ---
 
 ## 5. Implementation Phases
 
-### Phase 1 — Skeleton & Voice Pipeline (Week 1-2)
+### Phase 1 — Skeleton & Voice Pipeline (Stories 0-6, Week 1-2)
 
-- [ ] Project scaffolding: `server/` (Python + FastAPI) and `web/` (React) packages
-- [ ] Twilio account setup: buy a number, configure webhook URL
-- [ ] Incoming call webhook → respond with `<Connect><Stream>` TwiML
-- [ ] WebSocket server: receive Twilio media events, decode μ-law audio
-- [ ] Pipe audio to Deepgram streaming STT; log transcripts to console
-- [ ] Pipe transcript to LLM (hardcoded system prompt); stream response
-- [ ] Pipe LLM text to ElevenLabs TTS (μ-law); send audio back to Twilio
+- [x] Project scaffolding: `server/` (Python + FastAPI) and `web/` (React)
+- [x] Twilio account setup: phone number purchased, webhook configured
+- [x] Incoming call webhook → `<Connect><Stream>` TwiML
+- [x] WebSocket server: receive Twilio media events, decode μ-law audio
+- [x] Deepgram STT client (standalone, tested with live audio)
+- [x] LLM client (standalone, streaming + tool calling + structured output)
+- [ ] ElevenLabs TTS client (standalone, μ-law output)
+- [ ] Pipe STT → LLM → TTS end-to-end with hardcoded system prompt
 - [ ] **Milestone:** Make a phone call, have a free-form AI conversation
 
-### Phase 2 — Workflow Engine (Week 3)
+### Phase 2 — Workflow Engine (Stories 7-9, Week 3-4)
 
-- [ ] Define workflow JSON schema
-- [ ] Implement the state machine engine (node transitions, edge evaluation)
-- [ ] Wire engine into the voice pipeline (engine controls the LLM system prompt per node)
-- [ ] Implement slot extraction from LLM responses (structured output / tool calls)
-- [ ] Implement `llm` edge condition evaluation
-- [ ] Hardcode one test workflow in JSON; test end-to-end
-- [ ] **Milestone:** Call follows a multi-step workflow (greeting → collect info → transfer/hang up)
+- [ ] Conversation nodes: per-node instructions, examples, max_iterations, own chat history
+- [ ] Router LLM (STAY or transition) + Responder LLM (generate reply)
+- [ ] Context passing: node summaries + key info carried between nodes
+- [ ] Decision nodes: pure routing, no caller conversation
+- [ ] Action nodes: end_call, transfer (extensible action_type)
+- [ ] Wire engine into voice pipeline (replaces hardcoded prompt)
+- [ ] **Milestone:** Call follows a multi-node workflow with branching
 
-### Phase 3 — Visual Workflow Builder (Week 4-5)
+### Phase 3 — Persistence & Visual Builder (Stories 10-12, Week 5-6)
 
-- [ ] React app scaffolding (Vite + TypeScript + Tailwind) in `web/`
-- [ ] Integrate React Flow with custom node components for each node type
-- [ ] Node config panels (click a node → edit its properties in a sidebar)
-- [ ] Save/load workflows via REST API
-- [ ] Publish workflow (mark as active for a given phone number)
-- [ ] **Milestone:** Build a workflow in the browser, publish it, call the number, and have it execute
+- [ ] REST API: workflow CRUD, call logs, event logging
+- [ ] SQLite persistence (workflows survive restarts)
+- [ ] React Flow visual builder: conversation, decision, action nodes
+- [ ] Edge labels editable in the builder
+- [ ] Save/publish workflows from the UI
+- [ ] Call log viewer: transcript timeline, workflow path, node summaries
+- [ ] **Milestone:** Build a workflow in the browser, publish it, call the number, review the logs
 
-### Phase 4 — Polish & Observability (Week 6)
+### Phase 4 — Polish (Story 13, Week 7)
 
-- [ ] Call logging: store full transcripts + metadata + workflow path taken
-- [ ] Call log viewer in dashboard
-- [ ] Filler-phrase strategy for high-latency responses
-- [ ] Interruption handling (caller speaks while TTS is playing)
-- [ ] Error handling & graceful degradation (STT/LLM/TTS failures)
-- [ ] Basic auth on the dashboard
+- [ ] Interruption handling (clear TTS on caller speech)
+- [ ] Filler phrases for LLM latency
+- [ ] Error handling & graceful degradation
+- [ ] Basic auth on dashboard + Twilio signature validation
 - [ ] **Milestone:** PoC demo-ready
 
 ---
@@ -279,9 +320,9 @@ callme/
 │   │   ├── tts/
 │   │   │   └── elevenlabs.py    # ElevenLabs TTS client (μ-law output)
 │   │   ├── workflow/
-│   │   │   ├── engine.py        # State machine / graph walker
-│   │   │   ├── nodes.py         # Node type handlers
-│   │   │   └── conditions.py    # Edge condition evaluators
+│   │   │   ├── engine.py        # State machine — Router + Responder LLM orchestration
+│   │   │   ├── schema.py        # Pydantic models for workflow JSON validation
+│   │   │   └── models.py        # NodeSummary, WorkflowContext dataclasses
 │   │   ├── db/
 │   │   │   ├── models.py        # SQLAlchemy/SQLModel schemas
 │   │   │   └── session.py       # Async DB session factory

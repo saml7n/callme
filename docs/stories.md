@@ -18,12 +18,13 @@ Story 0: Decisions (no code)
       → Story 4: LLM client (standalone, tested in isolation)
       → Story 5: ElevenLabs TTS client (standalone, tested in isolation)
         → Story 6: End-to-end voice pipeline (first real phone conversation)
-          → Story 7: Workflow schema & engine (state machine, no UI)
-            → Story 8: Voice pipeline + workflow integration (calls follow workflows)
-              → Story 9: REST API for workflows & call logs
-                → Story 10: Visual workflow builder (React Flow)
-                  → Story 11: Call log viewer
-                    → Story 12: Polish — interruptions, filler phrases, error handling, auth
+          → Story 7: Conversation nodes + single-node workflow engine
+            → Story 8: Decision nodes + multi-node workflows (routing & context passing)
+              → Story 9: Action nodes (end_call, transfer)
+                → Story 10: REST API + persistence (workflows & call logs)
+                  → Story 11: Visual workflow builder (React Flow)
+                    → Story 12: Call log viewer
+                      → Story 13: Polish — interruptions, filler phrases, error handling, auth
 ```
 
 ---
@@ -107,7 +108,7 @@ As a **developer**, I want **a working project skeleton with linting, testing, a
 As a **developer**, I want **the server to answer an inbound Twilio call and establish a bidirectional WebSocket media stream**, so that **raw audio flows between the caller and our server in real time**.
 
 ### Acceptance criteria
-- [ ] A FastAPI route exists at `POST /twilio/incoming` that returns TwiML:
+- [x] A FastAPI route exists at `POST /twilio/incoming` that returns TwiML:
   ```xml
   <Response>
     <Connect>
@@ -115,14 +116,14 @@ As a **developer**, I want **the server to answer an inbound Twilio call and est
     </Connect>
   </Response>
   ```
-- [ ] A FastAPI WebSocket endpoint exists at `/twilio/media-stream` that:
+- [x] A FastAPI WebSocket endpoint exists at `/twilio/media-stream` that:
   - Accepts the Twilio connection.
   - Parses the `connected`, `start`, `media`, and `stop` events from Twilio's JSON protocol.
   - Logs the `streamSid`, `callSid`, and audio codec from the `start` event.
   - Decodes base64 μ-law audio payloads from `media` events.
   - Can send base64-encoded μ-law audio back to Twilio via the `media` message format.
   - Handles `stop` and WebSocket close gracefully.
-- [ ] The Twilio phone number's webhook is configured to point at `{PUBLIC_URL}/twilio/incoming` (via console or API).
+- [x] The Twilio phone number's webhook is configured to point at `{PUBLIC_URL}/twilio/incoming` (via console or API).
 
 ### Unit tests
 - Mock WebSocket tests:
@@ -143,8 +144,8 @@ As a **developer**, I want **the server to answer an inbound Twilio call and est
 2. Confirm the tunnel (ngrok / Cloudflare) is working and the public URL is stable for dev.
 
 **Recorded answers:**
-- Twilio number configured: _unanswered_
-- Tunnel confirmed: _unanswered_
+- Twilio number configured: `+441279969211` (SID: `PN10ff13ded9e05309982affcdece20dc6`). Webhook set to `{PUBLIC_URL}/twilio/incoming` via Twilio REST API.
+- Tunnel confirmed: ngrok free tier. URL changes per session — webhook must be re-set each time ngrok restarts.
 
 ---
 
@@ -153,13 +154,13 @@ As a **developer**, I want **the server to answer an inbound Twilio call and est
 As a **developer**, I want **a tested, reusable Deepgram streaming client**, so that **I can feed it raw audio and receive real-time transcripts without coupling it to the Twilio handler**.
 
 ### Acceptance criteria
-- [ ] A Python module exists at `app/stt/deepgram.py` with a class `DeepgramSTTClient`:
+- [x] A Python module exists at `app/stt/deepgram.py` with a class `DeepgramSTTClient`:
   - `async connect()` — opens a WebSocket to Deepgram's streaming endpoint with config: `model`, `encoding=mulaw`, `sample_rate=8000`, `channels=1`, `punctuate=true`, `endpointing` (configurable ms).
   - `async send_audio(chunk: bytes)` — sends raw audio bytes to Deepgram.
   - `async receive_transcript()` — async generator yielding transcript events with: `transcript` (str), `is_final` (bool), `speech_final` (bool), `confidence` (float).
   - `async close()` — sends close signal and disconnects.
-- [ ] The client reads `DEEPGRAM_API_KEY` from config.
-- [ ] Connection errors, auth failures, and unexpected disconnects are handled with clear exceptions.
+- [x] The client reads `DEEPGRAM_API_KEY` from config.
+- [x] Connection errors, auth failures, and unexpected disconnects are handled with clear exceptions.
 
 ### Unit tests (mocked WebSocket)
 - Successful connection → receives a transcript event → yields correct fields.
@@ -177,8 +178,8 @@ As a **developer**, I want **a tested, reusable Deepgram streaming client**, so 
 2. Endpointing threshold — default 300ms or tune differently?
 
 **Recorded answers:**
-- Model: _unanswered_
-- Endpointing: _unanswered_
+- Model: Nova-3 (confirmed from Story 0).
+- Endpointing: 300ms (default, working well in QA — clean speech_final events).
 
 ---
 
@@ -187,14 +188,14 @@ As a **developer**, I want **a tested, reusable Deepgram streaming client**, so 
 As a **developer**, I want **a tested, swappable LLM client with streaming support and tool calling**, so that **I can generate conversational responses and structured data extraction without coupling to the voice pipeline**.
 
 ### Acceptance criteria
-- [ ] A Python module exists at `app/llm/openai.py` with a class `LLMClient`:
+- [x] A Python module exists at `app/llm/openai.py` with a class `LLMClient`:
   - `async chat_stream(messages: list[dict], tools: list[dict] | None) -> AsyncGenerator[str, None]` — streams text chunks from the LLM.
   - `async chat(messages: list[dict], tools: list[dict] | None) -> str` — returns the full response (non-streaming, for simpler use cases).
   - `async chat_structured(messages: list[dict], schema: dict) -> dict` — returns structured JSON output validated against a schema (for slot extraction).
   - Supports system messages, tool definitions, and tool-call responses.
-- [ ] The client reads `OPENAI_API_KEY` from config. Model name is configurable (default: `gpt-4o`).
-- [ ] An abstract base class or protocol `BaseLLMClient` exists so Claude or another provider can be swapped in later.
-- [ ] Rate limit (429) and server error (5xx) responses trigger retries with backoff (max 3 attempts).
+- [x] The client reads `OPENAI_API_KEY` from config. Model name is configurable (default: `gpt-4o`).
+- [x] An abstract base class or protocol `BaseLLMClient` exists so Claude or another provider can be swapped in later.
+- [x] Rate limit (429) and server error (5xx) responses trigger retries with backoff (max 3 attempts).
 
 ### Unit tests (mocked HTTP)
 - Streaming: yields chunks in order, concatenation matches expected full response.
@@ -214,8 +215,8 @@ As a **developer**, I want **a tested, swappable LLM client with streaming suppo
 2. Are there any content/safety guardrails to set in the system prompt for the PoC?
 
 **Recorded answers:**
-- LLM provider: _unanswered_
-- Guardrails: _unanswered_
+- LLM provider: OpenAI GPT-4o (confirmed from Story 0). SDK v2.21.0.
+- Guardrails: None for PoC — system prompt only.
 
 ---
 
@@ -224,13 +225,13 @@ As a **developer**, I want **a tested, swappable LLM client with streaming suppo
 As a **developer**, I want **a tested ElevenLabs TTS client that outputs μ-law audio suitable for Twilio**, so that **I can convert text to speech independently of the voice pipeline**.
 
 ### Acceptance criteria
-- [ ] A Python module exists at `app/tts/elevenlabs.py` with a class `ElevenLabsTTSClient`:
+- [x] A Python module exists at `app/tts/elevenlabs.py` with a class `ElevenLabsTTSClient`:
   - `async synthesize(text: str) -> bytes` — returns complete μ-law audio bytes for the given text.
   - `async synthesize_stream(text: str) -> AsyncGenerator[bytes, None]` — streams μ-law audio chunks as they become available (for lower latency).
   - Configurable: `voice_id`, `model_id`, `output_format` (default: `ulaw_8000` for Twilio compatibility), `optimize_streaming_latency` (default: `3`).
-- [ ] The client reads `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` from config.
-- [ ] Previous/next request stitching (`previous_request_ids`) is supported for multi-sentence continuity.
-- [ ] Auth failure and rate-limit errors are handled with clear exceptions.
+- [x] The client reads `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` from config.
+- [x] Previous/next request stitching (`previous_request_ids`) is supported for multi-sentence continuity.
+- [x] Auth failure and rate-limit errors are handled with clear exceptions.
 
 ### Unit tests (mocked HTTP)
 - `synthesize` returns audio bytes for a given text input.
@@ -250,8 +251,8 @@ As a **developer**, I want **a tested ElevenLabs TTS client that outputs μ-law 
 2. Latency optimisation level — `3` (high optimisation, slight quality trade-off) or `2` (balanced)?
 
 **Recorded answers:**
-- Voice ID: _unanswered_
-- Latency level: _unanswered_
+- Voice ID: Rachel (`21m00Tcm4TlvDq8ikWAM`) — confirmed from Story 0.
+- Latency level: `3` (high optimisation) — acceptable quality trade-off for PoC.
 
 ---
 
@@ -262,17 +263,17 @@ As a **demo presenter**, I want to **call the Twilio number and have a free-form
 This is the first story where all audio components come together. No workflow engine yet — the LLM uses a single hardcoded system prompt.
 
 ### Acceptance criteria
-- [ ] A `CallPipeline` class (or equivalent) in `app/pipeline.py` orchestrates a single call:
+- [x] A `CallPipeline` class (or equivalent) in `app/pipeline.py` orchestrates a single call:
   1. Receives audio from the Twilio WebSocket handler (Story 2).
   2. Forwards audio chunks to `DeepgramSTTClient` (Story 3).
   3. On `speech_final`, sends the transcript + conversation history to `LLMClient.chat_stream()` (Story 4).
   4. As LLM text chunks arrive, accumulates them into sentences (split on `.`, `!`, `?`).
   5. Sends each sentence to `ElevenLabsTTSClient.synthesize_stream()` (Story 5).
   6. Forwards TTS audio chunks back to the Twilio WebSocket as base64 `media` messages.
-- [ ] The hardcoded system prompt is: *"You are a friendly AI receptionist for a business. Greet the caller, ask how you can help, and have a natural conversation. Keep responses concise — 1-2 sentences at a time."*
-- [ ] On call start, the system speaks a greeting without waiting for the caller (proactive first message).
-- [ ] Conversation history (messages array) is maintained for the duration of the call.
-- [ ] The pipeline handles Twilio `stop` event and caller hang-up gracefully (closes STT and any in-flight requests).
+- [x] The hardcoded system prompt is: *"You are a friendly AI receptionist for a business. Greet the caller, ask how you can help, and have a natural conversation. Keep responses concise — 1-2 sentences at a time."*
+- [x] On call start, the system speaks a greeting without waiting for the caller (proactive first message).
+- [x] Conversation history (messages array) is maintained for the duration of the call.
+- [x] The pipeline handles Twilio `stop` event and caller hang-up gracefully (closes STT and any in-flight requests).
 
 ### Unit tests
 - Pipeline receives a `speech_final` transcript → calls LLM with correct message history.
@@ -294,256 +295,362 @@ This is the first story where all audio components come together. No workflow en
 2. Sentence splitting strategy — split on punctuation, or use a smarter chunking approach?
 
 **Recorded answers:**
-- Services confirmed: _unanswered_
-- Sentence splitting: _unanswered_
+- Services confirmed: All four services (Twilio, Deepgram, ElevenLabs, OpenAI) individually QA'd in Stories 2-5.
+- Sentence splitting: Split on punctuation (`.!?`) — eagerly sends each completed sentence to TTS for low latency. Any trailing text without punctuation is flushed as a remainder.
 
 ---
 
-## Story 7 — Workflow JSON schema & engine
+## Story 7 — Workflow engine with conversation nodes
 
-As a **developer**, I want **a workflow engine that reads a JSON graph and controls conversation flow as a state machine**, so that **calls follow structured, configurable paths instead of a single hardcoded prompt**.
+As a **developer**, I want **a workflow engine that loads a JSON workflow and runs conversation nodes with per-node chat history**, so that **the AI receptionist's behaviour is configurable without code changes**.
 
-This story produces the engine and schema only — no UI, no integration with the voice pipeline yet.
+This is the first workflow story. It supports only **conversation nodes** — the simplest, most important node type. Decision nodes and action nodes come in later stories. The engine is wired into the voice pipeline immediately, so QA is a real phone call.
+
+### Design: Three Node Types (built incrementally)
+
+| Type | Purpose | Built in |
+|---|---|---|
+| **Conversation** | Talks to the caller following plain-English instructions. Has its own chat history. A Router LLM decides each turn whether to STAY or transition. | **This story** |
+| **Decision** | Pure routing — no conversation with the caller. Evaluates accumulated context and picks an outgoing edge. | Story 8 |
+| **Action** | Performs a side effect (end call, transfer, etc.). Extensible — new action types added over time. | Story 9 |
+
+### Design: Context Passing Between Nodes
+
+Each conversation node maintains its **own `messages[]`** array — separate from other nodes. When transitioning between nodes:
+1. A summary of the outgoing node's conversation is generated (via LLM).
+2. Key information points are extracted (names, dates, intents, etc.).
+3. The next node receives accumulated summaries as context prefix, keeping its own chat history focused and avoiding LLM context bloat.
+
+### Workflow JSON Format
+
+```json
+{
+  "id": "wf_001",
+  "name": "Dental Reception",
+  "version": 1,
+  "entry_node_id": "node_1",
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are a friendly receptionist for Smile Dental. Greet the caller warmly and ask how you can help today.",
+        "examples": [
+          { "role": "user", "content": "Hi, I'd like to book a cleaning" },
+          { "role": "assistant", "content": "Of course! I'd be happy to help. Could I get your name first?" }
+        ],
+        "max_iterations": 5
+      },
+      "position": { "x": 100, "y": 100 }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_1", "target": "node_2", "label": "Caller has stated their need" }
+  ]
+}
+```
 
 ### Acceptance criteria
-- [ ] A JSON schema file exists at `server/schemas/workflow.schema.json` defining the workflow format with:
+- [x] A workflow schema is defined (Pydantic models or JSON schema) supporting:
   - `id`, `name`, `version` (metadata).
-  - `nodes[]` — each with `id`, `type` (enum: `greeting`, `collect_info`, `llm_conversation`, `api_call`, `transfer`, `end_call`), `data` (type-specific config), `position` (for the visual builder later).
-  - `edges[]` — each with `id`, `source`, `target`, `condition` (null | `{ type: "expression", expr: "..." }` | `{ type: "llm", prompt: "..." }`).
-  - `entry_node_id` — the starting node.
-- [ ] A validation function at `app/workflow/validation.py` validates a workflow dict against the schema.
-- [ ] A sample workflow JSON exists at `server/schemas/examples/reception.json` with 5+ nodes covering a realistic reception scenario (greeting → collect info → branch on reason → transfer or end).
-- [ ] A `WorkflowEngine` class exists at `app/workflow/engine.py`:
-  - `__init__(workflow: dict, llm_client: LLMClient)` — loads and validates the graph.
-  - `current_node` property — returns the active node.
-  - `context` property — returns `{ slots: dict, transcript: list, turn_count: int }`.
-  - `async start() -> NodeAction` — enters the entry node and returns its action (e.g. speak the greeting).
-  - `async handle_input(transcript: str) -> NodeAction` — processes caller input for the current node, evaluates outgoing edges, transitions if a condition matches, and returns the next action.
-  - `NodeAction` is a dataclass: `{ type: "speak" | "collect" | "api_call" | "transfer" | "end", data: dict }`.
-- [ ] Node handlers exist at `app/workflow/nodes.py`:
-  - `GreetingHandler` — returns a `speak` action with the configured message.
-  - `CollectInfoHandler` — uses the LLM to extract slots from the transcript; returns `collect` action (re-ask if required slots are missing).
-  - `LLMConversationHandler` — passes the transcript to the LLM with the node's system prompt; returns `speak` action.
-  - `ApiCallHandler` — makes an HTTP request with slot data templated into the URL/body; returns `speak` with the result or follows success/failure edges.
-  - `TransferHandler` — returns a `transfer` action with the target number.
-  - `EndCallHandler` — returns an `end` action with the closing message.
-- [ ] Edge condition evaluators exist at `app/workflow/conditions.py`:
-  - `evaluate_expression(expr: str, context: dict) -> bool` — safely evaluates a Python expression against slot data.
-  - `async evaluate_llm(prompt: str, context: dict, llm_client: LLMClient) -> bool` — asks the LLM a yes/no question about the conversation context.
+  - `nodes[]` — each with `id`, `type` (enum: `conversation`), `data` (type-specific), `position`.
+  - `edges[]` — each with `id`, `source`, `target`, `label` (plain English description of when to follow this edge).
+  - `entry_node_id`.
+- [x] Conversation node `data` includes:
+  - `instructions` (str) — system prompt / personality for this node.
+  - `examples` (list of `{ role, content }`, optional) — few-shot examples injected into the message history.
+  - `max_iterations` (int, default 10) — max conversation turns before forcing transition to the first outgoing edge.
+- [x] A `WorkflowEngine` class at `app/workflow/engine.py`:
+  - `__init__(workflow: dict, llm_client: LLMClient)` — loads and validates the workflow graph.
+  - `current_node` property.
+  - `async start() -> str` — enters the entry node and returns an initial response (Responder LLM generates it from the node's instructions).
+  - `async handle_input(transcript: str) -> tuple[str, bool]` — processes caller input, returns `(response_text, call_ended)`. Internally:
+    1. Appends the caller's transcript to the current node's chat history.
+    2. Calls the **Router LLM** with: current node info, outgoing edge labels, node chat history. Router returns `STAY` or an edge ID.
+    3. If `STAY`: calls the **Responder LLM** with node `instructions` + `examples` + node chat history → returns the response.
+    4. If transition: generates a summary of the current node's conversation, carries accumulated summaries forward, enters the new node, calls Responder LLM → returns the response.
+  - Checks `max_iterations` — if reached, forces transition along the first available edge.
+- [x] Each conversation node maintains its own `messages[]` (not shared with other nodes).
+- [x] When transitioning, a `NodeSummary` is generated: `{ summary: str, key_info: dict }` — extracted via a single LLM call.
+- [x] The `CallPipeline` from Story 6 accepts an optional workflow dict. If provided, it delegates to `WorkflowEngine` instead of the hardcoded prompt. If no workflow, falls back to Story 6 behaviour.
+- [x] A sample single-node workflow exists at `server/schemas/examples/simple_receptionist.json`.
+- [x] Workflow validation: missing `entry_node_id`, dangling edge references, missing required fields → clear error messages.
+- [x] A **workflow preview page** exists at `http://localhost:5173/workflows/preview` (React Flow, read-only) showing:
+  - All nodes with type badge, instructions preview, examples count, max iterations.
+  - Edges with labels and animated arrows.
+  - Entry node highlighted (indigo ring + "ENTRY" badge).
+  - Header with workflow name, version, node/edge counts.
+- [x] A `GET /api/workflows/active` endpoint returns the currently loaded workflow JSON.
+- [x] CORS enabled on the server for the Vite dev origin (`localhost:5173`).
 
-### Unit tests
-- **Schema validation:** valid sample workflow passes; missing required fields fail; invalid node type fails.
-- **Engine start:** enters entry node, returns correct greeting action.
-- **Engine handle_input:** transcript triggers edge evaluation → transitions to correct next node.
-- **CollectInfoHandler:** extracts slots from transcript; re-asks when required slot is missing.
-- **Expression evaluator:** `slots["reason"] == "billing"` returns True when slot matches; False otherwise; malicious expressions are blocked.
-- **LLM condition evaluator:** mocked LLM returns "yes" → True; "no" → False.
-- **Edge with null condition:** always transitions (unconditional).
-- **Multiple outgoing edges:** first matching condition wins.
-- **No matching edge:** engine stays on current node (doesn't crash).
-- **Dead-end node (no outgoing edges):** engine signals conversation complete.
+### Unit tests (mocked LLM)
+- **Engine start:** enters entry node, calls Responder LLM with node instructions, returns response.
+- **Handle input — STAY:** Router returns STAY → Responder called with node instructions + growing chat history → response returned.
+- **Handle input — TRANSITION:** Router returns edge ID → summary generated → new node entered → Responder called with new node's instructions + accumulated summaries.
+- **Max iterations:** after `max_iterations` turns, engine forces transition along first available edge without consulting Router.
+- **Single-node workflow (no outgoing edges):** engine stays in the node indefinitely (no crash, no forced transition).
+- **Router LLM context:** Router is called with correct payload (current node, edge labels, chat history).
+- **Responder LLM context:** Responder is called with node instructions, examples, accumulated summaries, and current node's chat history.
+- **Validation:** missing entry node → error; dangling edge target → error; empty workflow → error.
+- **Pipeline with workflow:** start → engine response → TTS called with text.
+- **Pipeline without workflow:** falls back to hardcoded prompt (Story 6 preserved).
 
 ### QA verification
-1. Load the sample `reception.json` workflow into the engine.
-2. Write an integration test script that simulates a caller interaction (no audio — just text in, actions out):
-   - Start → engine returns greeting.
-   - Input "I'd like to book an appointment" → engine transitions to collect_info node.
-   - Input "My name is Alex, I need a cleaning on Friday" → engine extracts slots (`caller_name: "Alex"`, `service: "cleaning"`, `day: "Friday"`).
-   - Engine transitions to the correct next node based on edge conditions.
-3. Run the script → all transitions match expected behavior.
+1. **Visual verification**: Open `http://localhost:5173/workflows/preview` in a browser → see the workflow graph rendered with React Flow. Verify:
+   - The "greeting" node is displayed with an indigo ring and "ENTRY" badge.
+   - Node shows: instructions preview, "4 examples", "max 20 turns".
+   - Header shows: "Simple Receptionist", "v1", "1 node", "0 edges".
+   - Minimap and zoom controls are present.
+2. **API verification**: `curl http://localhost:3000/api/workflows/active` → returns the full workflow JSON with correct `id`, `name`, `nodes`, `edges`.
+3. **Phone call**: Load the workflow into the pipeline and **call the Twilio number from a real phone**.
+4. Have a 3-4 turn conversation → AI follows the node's instructions, maintains context within the node.
+5. Compare to Story 6's hardcoded prompt → workflow-driven conversation is equally coherent.
 
 ### Blocked until answered
-1. Should expression conditions use a sandboxed evaluator or is `ast.literal_eval`-level safety sufficient for the PoC?
-2. For the LLM edge evaluator, should we use a cheap/fast model (e.g. GPT-4o-mini) to save cost and latency?
+1. Router LLM model: GPT-4o-mini (cheap/fast) or same as Responder (GPT-4o)?
+2. Summary generation: separate LLM call, or fold into the Router's response?
 
 **Recorded answers:**
-- Expression safety: _unanswered_
-- LLM evaluator model: _unanswered_
+- Router model: GPT-4o-mini (cheap/fast for routing decisions).
+- Summary approach: Separate LLM call via the Router model — generates `{ summary, key_info }` JSON on node transition.
+
+**Completion evidence:**
+- Unit tests: 111 passed (24 pipeline, 15 engine, 14 schema, plus existing tests).
+- QA — Visual: Workflow preview page at `/workflows/preview` renders single-node graph with ENTRY badge, instructions preview, 4 examples, max 20 turns.
+- QA — API: `curl /api/workflows/active` returns full workflow JSON.
+- QA — Phone call: Called +441279969211, AI greeted as Smile Dental receptionist, responded to questions about services and hours across multiple turns.
 
 ---
 
-## Story 8 — Voice pipeline + workflow integration
+## Story 8 — Decision nodes + multi-node workflows
 
-As a **caller**, I want **the AI receptionist to follow a structured workflow** (greeting → questions → routing), so that **my call is handled consistently regardless of which AI model is having a good day**.
+As a **caller**, I want **the AI to route my call through different conversation paths based on what I say**, so that **I get relevant, focused help instead of a generic response**.
 
-This story wires the `WorkflowEngine` (Story 7) into the `CallPipeline` (Story 6).
+This story adds **decision nodes** and proves multi-node workflows with context (summary + key info) passing between nodes.
 
 ### Acceptance criteria
-- [ ] `CallPipeline` accepts an optional `workflow_id` parameter. If provided, it loads the workflow from the database (or JSON file for now) and creates a `WorkflowEngine`.
-- [ ] The pipeline's behaviour changes based on `NodeAction` types:
-  - `speak` → send text through TTS and play to caller.
-  - `collect` → send the prompt through TTS, then wait for caller input and re-invoke `engine.handle_input()`.
-  - `api_call` → execute the HTTP request, feed the result back to the engine.
-  - `transfer` → send a Twilio `<Dial>` or SIP transfer to the target number.
-  - `end` → speak the closing message, then close the WebSocket (Twilio hangs up).
-- [ ] The hardcoded system prompt from Story 6 is replaced by per-node prompts from the workflow.
-- [ ] If no workflow is configured, the pipeline falls back to the hardcoded free-form prompt (Story 6 behaviour).
-- [ ] Transfer action generates the correct Twilio REST API call (or TwiML update) to redirect the call.
+- [ ] Decision node type (`type: "decision"`) added to the workflow schema:
+  - `data.instruction` (str) — guidance for the Router LLM on what to evaluate (e.g. *"Determine the caller's primary intent"*).
+  - Multiple outgoing edges, each with a `label` describing the condition (e.g. *"Caller wants to book an appointment"*).
+  - No conversation with the caller — a decision node is purely routing logic.
+- [ ] When the engine enters a decision node:
+  1. The Router LLM evaluates accumulated context (summaries + key info from previous nodes) against the outgoing edge labels.
+  2. Picks the best matching edge.
+  3. Immediately transitions to the target node — **no response is spoken** from the decision node itself.
+- [ ] Context passing across multi-node workflows:
+  - On leaving a conversation node, a `NodeSummary` is generated: `{ summary: str, key_info: dict }`.
+  - Summaries accumulate as the call moves through the graph.
+  - Each new conversation node receives the accumulated summaries as a context prefix before its own instructions.
+  - Per-node chat history is fresh (not carried over — only summaries cross boundaries).
+- [ ] A sample multi-node workflow at `server/schemas/examples/reception_flow.json` with at least 5 nodes:
+  - Greeting (conversation) → Intent router (decision) → Book appointment (conversation) / General inquiry (conversation) / Speak to human (conversation).
+- [ ] The workflow is loaded into the voice pipeline and testable via a real phone call.
 
-### Unit tests
-- Pipeline with a workflow: start → greeting action → TTS called with greeting text.
-- Pipeline with a collect node: receives transcript → passes to engine → engine extracts slots → re-asks if incomplete.
-- Pipeline with an end node: speaks closing message → closes WebSocket.
-- Pipeline with a transfer node: correct Twilio API call is made with target number.
-- Pipeline without a workflow: falls back to hardcoded prompt (Story 6 behaviour preserved).
+### Unit tests (mocked LLM)
+- **Decision node:** Router evaluates accumulated context → picks the correct edge based on labels.
+- **Decision node — no matching edge:** falls back to first edge (graceful default).
+- **Decision node is silent:** no response text generated for the caller.
+- **Multi-node traversal:** greeting → decision → conversation node A (correct path taken, verified by checking which node is current).
+- **Context accumulation:** summaries from nodes 1 and 2 are present in the context passed to node 3.
+- **Summary generation:** LLM is called with the outgoing node's chat history; result stored as `NodeSummary`.
+- **Fresh chat history:** when entering a new conversation node, its `messages[]` starts empty (only summaries are inherited).
+- **Decision node with single outgoing edge:** immediately follows that edge (no LLM call needed).
 
 ### QA verification
-1. Load the sample `reception.json` workflow and configure the phone number to use it.
-2. **Call the Twilio number from a real phone.**
-3. Hear the greeting defined in the workflow's greeting node (not the generic Story 6 greeting).
-4. Say "I'd like to speak to someone in billing" → the call follows the correct branch (based on LLM edge condition).
-5. If the workflow has a transfer node, confirm the call is transferred (or hear the transfer announcement).
-6. If the workflow has an end node, hear the closing message and the call disconnects.
-7. Repeat with a different caller intent to exercise a different branch.
+1. **Visual verification**: Open `http://localhost:5173/workflows/preview` → see the full multi-node graph. Verify:
+   - 5 nodes visible: greeting (entry), intent router (decision), book appointment, general inquiry, speak to human.
+   - Decision node rendered distinctly (yellow/diamond style).
+   - Edges with labels connecting all nodes correctly.
+   - Entry node highlighted.
+2. **API verification**: `curl http://localhost:3000/api/workflows/active` → returns the full 5-node workflow JSON.
+3. **Phone call — booking path**: Call the Twilio number, say *"I'd like to book a cleaning"* → AI routes to the appointment booking node, asks relevant follow-up questions about dates and times.
+4. **Phone call — inquiry path**: Hang up. Call again, say *"I have a question about your prices"* → AI routes to the general inquiry node, discusses services and pricing.
+5. **Phone call — transfer path**: Call again, say *"Can I speak to someone?"* → AI routes to the "speak to human" node.
+6. In each case, verify the AI's responses match the target node's instructions (not generic fallback).
 
 ### Blocked until answered
-1. Transfer implementation: Twilio REST API to update the live call, or close WebSocket and fall back to TwiML? (REST API update is cleaner.)
-2. Should the pipeline stream interim transcripts to the engine (for faster response) or wait for `speech_final`?
+- None (builds on Story 7 decisions).
+
+---
+
+## Story 9 — Action nodes (end call, transfer)
+
+As a **developer**, I want **action nodes that perform side effects — ending the call or transferring to a human**, so that **workflows can do more than talk — they can take real actions**.
+
+Action nodes are extensible by `action_type`. This story ships the first two types; more (e.g. `api_call`, `send_sms`, `schedule_callback`) can be added later without schema changes.
+
+### Acceptance criteria
+- [ ] Action node type (`type: "action"`) added to the workflow schema:
+  - `data.action_type` (str) — extensible enum, starting with: `end_call`, `transfer`.
+  - Type-specific fields in `data`:
+    - `end_call`: `{ message: str }` — closing message to speak before hanging up.
+    - `transfer`: `{ target_number: str, announcement: str }` — message to speak, then transfer the call.
+- [ ] When the engine enters an action node:
+  - `end_call` → returns `(message, call_ended=True)`.
+  - `transfer` → returns `(announcement, call_ended=False)` + a `transfer` signal with the target number.
+- [ ] The `CallPipeline` handles action results:
+  - `call_ended=True` → TTS speaks the closing message, then closes the Twilio WebSocket (call ends).
+  - `transfer` → TTS speaks the announcement, then sends a Twilio REST API call to update the live call with `<Dial><Number>target</Number></Dial>` TwiML (or closes WebSocket with transfer TwiML).
+- [ ] Update `reception_flow.json` to include:
+  - An `end_call` action after the general inquiry branch.
+  - A `transfer` action for the "speak to human" branch.
+- [ ] Unknown `action_type` raises a descriptive `WorkflowError`.
+
+### Unit tests
+- **End call action:** engine returns message + `call_ended=True`.
+- **Transfer action:** engine returns announcement + transfer signal with target number.
+- **Pipeline handles end_call:** TTS speaks message, WebSocket close triggered.
+- **Pipeline handles transfer:** TTS speaks announcement, Twilio REST API called with correct number.
+- **Unknown action_type:** raises `WorkflowError` with descriptive message.
+- **Action node with outgoing edges after end_call:** edges are ignored (end_call is terminal).
+- **Action node with outgoing edges after transfer:** optionally follow a "transfer failed" edge.
+
+### QA verification
+1. **Visual verification**: Open `http://localhost:5173/workflows/preview` → see action nodes rendered with red styling and action_type badges (`end_call`, `transfer`). Verify edges connect to them correctly from conversation/decision nodes.
+2. **Phone call — transfer**: Call the Twilio number, navigate through the flow to the "speak to human" branch → hear the transfer announcement. (For PoC, the transfer target can be your own mobile — verify the call redirects.)
+3. **Phone call — end call**: Call again, navigate to the general inquiry branch, complete the conversation → hear the closing message, call disconnects cleanly.
+4. Server logs show clean shutdown (no errors, no orphaned connections).
+
+### Blocked until answered
+1. Transfer implementation: Twilio REST API to update the live call, or close WebSocket and return TwiML?
+2. For PoC testing, should transfer go to a real number, or just play an announcement and hang up?
 
 **Recorded answers:**
 - Transfer method: _unanswered_
-- Interim vs final transcripts: _unanswered_
+- Transfer target: _unanswered_
 
 ---
 
-## Story 9 — REST API for workflows & call logs
+## Story 10 — REST API + persistence
 
-As a **dashboard developer**, I want **CRUD endpoints for workflows and read endpoints for call logs**, so that **the React frontend has a backend to talk to**.
+As a **dashboard developer**, I want **CRUD endpoints for workflows and read endpoints for call logs**, so that **the React frontend has a backend to talk to and workflows survive server restarts**.
 
 ### Acceptance criteria
 - [ ] Database schema (SQLModel) with tables:
-  - `workflows` — `id`, `name`, `version`, `graph_json` (the full node/edge JSON), `is_active` (bool), `phone_number` (nullable — which Twilio number uses this workflow), `created_at`, `updated_at`.
-  - `calls` — `id`, `call_sid`, `from_number`, `to_number`, `workflow_id` (FK, nullable), `started_at`, `ended_at`, `duration_seconds`.
-  - `call_events` — `id`, `call_id` (FK), `timestamp`, `event_type` (enum: `transcript`, `llm_response`, `node_transition`, `slot_extracted`, `transfer`, `error`), `data_json`.
-- [ ] Alembic (or equivalent) migration creates the tables.
+  - `workflows` — `id` (UUID), `name`, `version`, `graph_json` (full workflow JSON), `is_active` (bool), `phone_number` (nullable), `created_at`, `updated_at`.
+  - `calls` — `id` (UUID), `call_sid`, `from_number`, `to_number`, `workflow_id` (FK, nullable), `started_at`, `ended_at`, `duration_seconds`.
+  - `call_events` — `id`, `call_id` (FK), `timestamp`, `event_type` (enum: `transcript`, `llm_response`, `node_transition`, `summary_generated`, `action_executed`, `error`), `data_json`.
+- [ ] SQLite database created on startup (no migration tool needed for PoC).
 - [ ] REST API endpoints:
-  - `GET /api/workflows` — list all workflows (summary: id, name, is_active, updated_at).
+  - `GET /api/workflows` — list all workflows (id, name, is_active, updated_at).
   - `GET /api/workflows/{id}` — full workflow including `graph_json`.
   - `POST /api/workflows` — create a new workflow.
-  - `PUT /api/workflows/{id}` — update a workflow (name, graph_json).
-  - `POST /api/workflows/{id}/publish` — set `is_active=True` and optionally assign a phone number (deactivates the previous active workflow for that number).
-  - `DELETE /api/workflows/{id}` — soft-delete or hard-delete.
-  - `GET /api/calls` — list recent calls (summary: id, from, to, workflow_name, started_at, duration).
-  - `GET /api/calls/{id}` — full call detail including all events (transcript, node transitions, etc.).
-- [ ] The voice pipeline (Story 8) logs events to the `call_events` table in real time during a call.
-- [ ] Input validation on all endpoints (Pydantic models).
+  - `PUT /api/workflows/{id}` — update a workflow.
+  - `POST /api/workflows/{id}/publish` — set `is_active=True` and assign to a phone number.
+  - `DELETE /api/workflows/{id}` — delete a workflow.
+  - `GET /api/calls` — list recent calls (id, from, to, workflow_name, started_at, duration).
+  - `GET /api/calls/{id}` — full call detail including all events.
+- [ ] The voice pipeline logs events to `call_events` in real time during a call (node transitions, transcripts, LLM responses, summaries).
+- [ ] The pipeline loads the active workflow for the Twilio number from the database (instead of from a JSON file).
+- [ ] Input validation on all endpoints (Pydantic models). Invalid `graph_json` → 422.
 
 ### Unit tests
-- Workflow CRUD: create → read → update → read (verify changes) → delete → read (404 or gone).
-- Publish: publishing workflow A deactivates the previously active workflow for the same phone number.
-- Call log: create a call record with events → list calls → get call detail with events.
-- Validation: creating a workflow with invalid `graph_json` (fails schema validation) returns 422.
-- Validation: required fields missing returns 422.
+- **CRUD:** create → read → update → read (verify changes) → delete → read (404).
+- **Publish:** publishing workflow A deactivates the previously active workflow for the same phone number.
+- **Call log:** create a call record with events → list calls → get call detail with events.
+- **Validation:** invalid `graph_json` → 422. Missing required fields → 422.
+- **Pipeline loads from DB:** active workflow is fetched and used by the engine.
 
 ### QA verification
-1. Start the server and use `curl` or Postman to:
-   - Create a workflow → 201 with ID.
-   - Get the workflow → matches what was created.
-   - Update the workflow → 200, changes persisted.
-   - Publish the workflow → `is_active` is True.
-   - List workflows → published workflow appears.
-2. Make a phone call (Story 8) → after the call, `GET /api/calls` shows the call → `GET /api/calls/{id}` shows the full transcript and node transitions.
+1. Use `curl` to create a workflow → 201. Get it → matches. Update it → 200. Publish it → `is_active=True`. List workflows → appears.
+2. **Call the Twilio number** → the published workflow drives the conversation.
+3. After the call, `GET /api/calls` shows the call → `GET /api/calls/{id}` shows transcript, node transitions, and summaries.
 
 ### Blocked until answered
 1. Soft-delete or hard-delete for workflows?
-2. Should call events be stored in a single JSONB column per call, or as individual rows in `call_events`?
+2. Auth on API endpoints now or defer to Story 13?
 
 **Recorded answers:**
 - Delete strategy: _unanswered_
-- Event storage: _unanswered_
+- Auth timing: _unanswered_
 
 ---
 
-## Story 10 — Visual workflow builder (React Flow)
+## Story 11 — Visual workflow builder (React Flow)
 
 As an **admin**, I want **a drag-and-drop visual editor for designing call workflows**, so that **I can create and modify call flows without writing JSON by hand**.
 
 ### Acceptance criteria
-- [ ] A page exists at `/workflows/new` (and `/workflows/{id}/edit`) in the React app.
-- [ ] The page renders a React Flow (`@xyflow/react`) canvas with:
-  - A left sidebar / palette listing available node types (Greeting, Collect Info, LLM Conversation, API Call, Transfer, End Call) that can be dragged onto the canvas.
-  - Custom node components for each type — visually distinct (icon + colour per type), showing a summary of the node's config.
-  - Edges drawn between node handles; edges with conditions show a label on the edge.
-  - Minimap, zoom controls, and background grid.
-- [ ] Clicking a node opens a right sidebar config panel with editable fields:
-  - Greeting: message text, voice selector.
-  - Collect Info: prompt text, slot definitions (name, type, required toggle).
-  - LLM Conversation: system prompt, max turns.
-  - API Call: URL, method, headers, body template, success/failure edge labels.
-  - Transfer: target phone number, announcement message.
-  - End Call: closing message.
-- [ ] "Save" button → `PUT /api/workflows/{id}` with the serialised React Flow graph (nodes + edges + positions).
-- [ ] "Publish" button → `POST /api/workflows/{id}/publish`.
-- [ ] Loading an existing workflow (`GET /api/workflows/{id}`) populates the canvas with saved nodes, edges, and positions.
-- [ ] Deleting a node removes it and its connected edges.
-- [ ] Basic validation: entry node required, no orphan nodes (warning), no duplicate node IDs.
+- [ ] A page at `/workflows/new` (and `/workflows/{id}/edit`) renders a React Flow canvas.
+- [ ] Left sidebar palette with three node types that can be dragged onto the canvas:
+  - **Conversation** (blue) — shows a preview of the `instructions` text.
+  - **Decision** (yellow/diamond) — shows the `instruction` text.
+  - **Action** (red) — shows the `action_type` badge.
+- [ ] Edges drawn between node handles. Each edge has an editable `label` (plain English condition).
+- [ ] Clicking a node opens a right sidebar config panel:
+  - **Conversation:** `instructions` (textarea), `examples` (add/remove pairs), `max_iterations` (number).
+  - **Decision:** `instruction` (textarea). Outgoing edge labels are edited on the edges themselves.
+  - **Action:** `action_type` (dropdown: `end_call`, `transfer`), then type-specific fields (`message` for end_call; `target_number` + `announcement` for transfer).
+- [ ] One node is marked as the entry node (visual indicator — e.g. green border or "START" badge). Clicking "Set as entry" on a node marks it.
+- [ ] "Save" → `PUT /api/workflows/{id}` with serialised graph. "Publish" → `POST /api/workflows/{id}/publish`.
+- [ ] Loading `/workflows/{id}/edit` fetches the workflow and renders saved nodes, edges, and positions.
+- [ ] Delete a node → node and connected edges removed.
+- [ ] Validation warnings: no entry node set, orphan nodes (no edges in or out), duplicate IDs.
+- [ ] Minimap, zoom controls, background grid.
 
-### Unit tests
-- React component tests (Vitest + React Testing Library):
-  - Canvas renders without crashing.
-  - Adding a node to the canvas → node appears in the React Flow state.
-  - Clicking a node → config panel opens with correct fields for that node type.
-  - Saving → correct payload sent to API (mock `fetch`).
-  - Loading a workflow → nodes and edges rendered in correct positions.
-  - Deleting a node → node and connected edges removed.
+### Unit tests (Vitest + React Testing Library)
+- Canvas renders without crashing.
+- Adding each node type → appears in React Flow state with correct type.
+- Clicking a conversation node → config panel shows instructions textarea.
+- Clicking an action node → config panel shows action_type dropdown.
+- Save → correct API payload sent (mock fetch).
+- Load workflow → nodes and edges in correct positions.
+- Delete a node → node and connected edges removed.
 
 ### QA verification (Playwright)
-1. **Navigate to `/workflows/new`** → canvas loads with empty grid and node palette.
-2. **Drag a Greeting node** onto the canvas → node appears.
-3. **Click the Greeting node** → config panel opens on the right.
-4. **Type a greeting message** ("Welcome to Acme Corp!") in the config panel → node summary updates on the canvas.
-5. **Drag a Collect Info node** onto the canvas → second node appears.
-6. **Draw an edge** from Greeting → Collect Info by dragging from the source handle to the target handle.
-7. **Click Save** → network request sent to API with correct payload (intercept and assert in Playwright).
-8. **Reload the page** (`/workflows/{id}/edit`) → the saved nodes, edges, and config are restored.
-9. **Click Publish** → confirmation shown, workflow marked as active.
-10. **Delete the Collect Info node** → node and its edge are removed.
+1. Navigate to `/workflows/new` → empty canvas with node palette.
+2. Drag a Conversation node, a Decision node, and an Action node onto the canvas.
+3. Click the Conversation node → config panel opens, type instructions → node preview updates.
+4. Draw edges between nodes → edge labels are editable.
+5. Mark the Conversation node as entry → visual indicator appears.
+6. Save → API call sent with correct payload. Reload → layout restored.
+7. Publish → workflow is active. **Call the Twilio number** → conversation follows the workflow built in the UI.
+8. Delete a node → node and edges removed.
 
 ### Blocked until answered
-1. UI framework / component library preference (shadcn/ui, Headless UI, plain Tailwind)?
-2. Should the voice selector in the Greeting node fetch voices from ElevenLabs API, or use a hardcoded list for PoC?
+1. UI component library: shadcn/ui, Headless UI, or plain Tailwind?
+2. Should the builder support undo/redo for PoC?
 
 **Recorded answers:**
 - UI library: _unanswered_
-- Voice selector: _unanswered_
+- Undo/redo: _unanswered_
 
 ---
 
-## Story 11 — Call log viewer
+## Story 12 — Call log viewer
 
-As an **admin**, I want to **view a list of past calls and drill into any call to see the full transcript and workflow path**, so that **I can review how the AI handled each caller and identify issues**.
+As an **admin**, I want **a list of past calls with drill-down into full transcripts and workflow paths**, so that **I can review how the AI handled each caller**.
 
 ### Acceptance criteria
-- [ ] A page exists at `/calls` in the React app showing a table of recent calls:
-  - Columns: date/time, caller number (masked: `+1 *** *** 1234`), duration, workflow name, status (completed / transferred / error).
-  - Sorted by most recent first.
-  - Pagination or infinite scroll.
+- [ ] A page at `/calls` shows a table of recent calls:
+  - Columns: date/time, caller number (masked: `+44 *** *** 1234`), duration, workflow name, status (completed / transferred / error).
+  - Sorted by most recent first. Pagination or infinite scroll.
 - [ ] Clicking a row navigates to `/calls/{id}` showing:
-  - Call metadata (date, duration, caller number, workflow used).
-  - Full transcript as a chat-style timeline (caller messages on the left, AI responses on the right).
-  - Workflow path visualisation: which nodes were visited, in order (could be a simple breadcrumb or a miniature flow diagram with visited nodes highlighted).
-  - Extracted slot data displayed as key-value pairs.
-  - Any errors or transfers noted inline in the timeline.
-- [ ] Data fetched from `GET /api/calls` and `GET /api/calls/{id}` (Story 9).
+  - Call metadata (date, duration, caller number, workflow name).
+  - Full transcript as a chat-style timeline (caller on the left, AI on the right).
+  - Workflow path: which nodes were visited, in order (breadcrumb or mini flow diagram with visited nodes highlighted).
+  - Node summaries displayed at each transition point in the timeline.
+  - Extracted key info shown as key-value badges.
+  - Errors or transfers noted inline.
+- [ ] Data from `GET /api/calls` and `GET /api/calls/{id}` (Story 10).
 
-### Unit tests
-- Call list component: renders rows from mock data; columns display correct values; phone number is masked.
-- Call detail component: renders transcript messages in correct order; caller vs AI messages styled differently.
-- Empty state: no calls → "No calls yet" message displayed.
+### Unit tests (Vitest + React Testing Library)
+- Call list: renders rows from mock data; phone number is masked; columns correct.
+- Call detail: transcript messages in chronological order; caller vs AI styled differently.
+- Workflow path: nodes listed in order; current node highlighted during playback.
+- Empty state: "No calls yet" message.
 - Error state: API failure → error message displayed.
 
 ### QA verification (Playwright)
-1. **Navigate to `/calls`** → table loads with at least one call (from previous QA runs).
-2. **Verify columns** — date, masked phone number, duration, workflow name are all visible.
-3. **Click a call row** → navigates to call detail page.
-4. **Verify transcript** — caller and AI messages are displayed in chronological order.
-5. **Verify slot data** — extracted slots (e.g. `caller_name: "Alex"`) are shown.
-6. **Verify workflow path** — the nodes visited during the call are displayed in order.
-7. **Navigate back** to the call list → previous state preserved (no re-fetch flicker).
+1. Navigate to `/calls` → table shows calls from previous QA runs.
+2. Verify columns: date, masked number, duration, workflow name.
+3. Click a call → detail page with transcript, node path, and key info.
+4. Verify transcript order matches what was said during the call.
+5. Navigate back → list state preserved.
 
 ### Blocked until answered
-1. Phone number masking: always mask in the UI, or configurable?
-2. Transcript: real-time (WebSocket updates during a live call) or post-call only for PoC?
+1. Phone number masking: always mask, or configurable?
+2. Real-time transcript (WebSocket updates during live call) or post-call only for PoC?
 
 **Recorded answers:**
 - Phone masking: _unanswered_
@@ -551,56 +658,55 @@ As an **admin**, I want to **view a list of past calls and drill into any call t
 
 ---
 
-## Story 12 — Polish: interruptions, filler phrases, error handling, auth
+## Story 13 — Polish: interruptions, filler phrases, error handling, auth
 
-As a **demo presenter**, I want **the system to feel polished — handling interruptions, filling silence during long LLM responses, recovering from errors, and requiring login**, so that **the PoC is demo-ready and doesn't fall apart on the first edge case**.
+As a **demo presenter**, I want **the system to feel polished — handling interruptions, filling silence, recovering from errors, and requiring login**, so that **the PoC is demo-ready**.
 
 ### Acceptance criteria
 
 #### Interruption handling
-- [ ] When the caller speaks while TTS audio is playing, the pipeline:
-  1. Immediately sends a `clear` message on the Twilio WebSocket to stop playback.
-  2. Discards any queued TTS audio for the interrupted response.
-  3. Processes the new caller input normally.
-- [ ] The system does not "talk over" the caller for more than ~500ms after they start speaking.
+- [ ] When the caller speaks while TTS audio is playing:
+  1. Immediately send a `clear` message on the Twilio WebSocket to stop playback.
+  2. Discard any queued TTS audio for the interrupted response.
+  3. Process the new caller input normally.
+- [ ] The system does not "talk over" the caller for more than ~500ms.
 
 #### Filler phrases
-- [ ] If the LLM takes > 800ms to start producing tokens, the pipeline plays a pre-synthesized filler phrase ("One moment, please", "Let me check on that", etc.).
-- [ ] Filler audio is pre-generated at server startup (3-5 variants) and cached — no TTS latency.
-- [ ] Filler audio is interrupted as soon as the real LLM response audio is ready.
+- [ ] If the LLM takes > 800ms to start producing tokens, the pipeline plays a pre-synthesised filler phrase (*"One moment, please"*, *"Let me check on that"*, etc.).
+- [ ] Filler audio is pre-generated at server startup (3-5 variants) and cached.
+- [ ] Filler is interrupted as soon as the real LLM response audio is ready.
 
 #### Error handling
-- [ ] If Deepgram disconnects mid-call: attempt reconnection (1 retry); if it fails, speak "I'm sorry, I'm having trouble hearing you. Please hold." and keep the call alive.
-- [ ] If the LLM request fails: speak "I apologize, I'm having a technical issue. Let me transfer you." and trigger a transfer to a fallback number (configurable).
-- [ ] If ElevenLabs fails: fall back to a basic TTS (Twilio `<Say>` or pyttsx3) for the error message, then attempt to continue.
+- [ ] Deepgram disconnect mid-call → attempt reconnection (1 retry); on failure, speak *"I'm sorry, I'm having trouble hearing you. Please hold."*
+- [ ] LLM failure → speak *"I apologise, I'm having a technical issue. Let me transfer you."* → trigger transfer to fallback number.
+- [ ] ElevenLabs failure → fall back to Twilio `<Say>` for the error message.
 - [ ] No unhandled exceptions crash the server or drop the WebSocket.
 
 #### Basic auth
-- [ ] The web dashboard requires login (email + password, or a simple shared secret for PoC).
+- [ ] Web dashboard requires login (simple shared secret or email/password).
 - [ ] API endpoints under `/api/` require a Bearer token or session cookie.
-- [ ] The Twilio webhook endpoint (`/twilio/incoming`) does **not** require auth (Twilio calls it) but validates the `X-Twilio-Signature` header.
+- [ ] `/twilio/incoming` does **not** require auth but validates `X-Twilio-Signature`.
 
 ### Unit tests
-- **Interruption:** Mock a scenario where STT emits a `speech_final` while TTS is sending audio → `clear` message sent, TTS queue flushed.
-- **Filler:** Mock LLM latency > 800ms → filler audio is sent before the real response.
-- **Filler cancelled:** Mock LLM response arriving at 600ms → no filler played.
-- **Deepgram reconnect:** Mock disconnect → reconnection attempt → success → pipeline resumes.
-- **Deepgram reconnect failure:** Mock disconnect → reconnection fails → fallback message spoken.
-- **LLM failure:** Mock 500 error → fallback message spoken, transfer triggered.
-- **TTS failure:** Mock ElevenLabs 500 → fallback TTS used for error message.
-- **Twilio signature validation:** Valid signature → request accepted. Invalid → 403.
+- **Interruption:** STT emits `speech_final` while TTS is playing → `clear` sent, queue flushed.
+- **Filler:** LLM latency > 800ms → filler audio sent. LLM latency < 800ms → no filler.
+- **Deepgram reconnect:** disconnect → retry → success. / disconnect → retry → fail → fallback message.
+- **LLM failure:** 500 → fallback message + transfer.
+- **TTS failure:** ElevenLabs 500 → Twilio `<Say>` fallback.
+- **Auth:** valid token → 200. Missing token → 401. Invalid → 403.
+- **Twilio signature:** valid → accepted. Invalid → 403.
 
 ### QA verification
-1. **Interruption test (real call):** Call the number, wait for the AI to start speaking a long response, then interrupt by speaking loudly mid-sentence → AI stops, processes your new input, and responds to it (not to the old context).
-2. **Filler test (real call):** Trigger a complex question that requires a long LLM response → hear a brief filler phrase before the real answer.
-3. **Error resilience (simulated):** Temporarily revoke the Deepgram API key → call the number → hear the fallback message (not silence or a crash).
-4. **Auth test (Playwright):** Navigate to `/calls` without logging in → redirected to login page. Log in → dashboard accessible. Invalid credentials → error message shown.
-5. **Twilio signature (curl):** Send a request to `/twilio/incoming` without a valid signature → 403. With a valid signature → 200 with TwiML.
+1. **Interruption (real call):** AI speaks a long response, interrupt mid-sentence → AI stops. Responds to the new input.
+2. **Filler (real call):** Ask a complex question → hear a filler phrase, then the real answer.
+3. **Error resilience:** Temporarily revoke Deepgram key → call → hear fallback message (not silence/crash).
+4. **Auth (Playwright):** `/calls` without login → redirected. Login → accessible. Bad credentials → error.
+5. **Twilio signature (curl):** request without signature → 403. With valid signature → 200.
 
 ### Blocked until answered
-1. Auth approach: email/password (with a users table), or a single shared secret/API key for the PoC?
+1. Auth approach: shared secret or email/password with a users table?
 2. Fallback transfer number for error scenarios?
-3. Filler phrase voice: same ElevenLabs voice as the active workflow, or a neutral pre-recorded voice?
+3. Filler phrase voice: same ElevenLabs voice as the active workflow, or pre-recorded neutral?
 
 **Recorded answers:**
 - Auth approach: _unanswered_
