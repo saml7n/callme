@@ -17,6 +17,7 @@ from fastapi import WebSocket
 from app.llm.openai import LLMClient
 from app.stt.deepgram import DeepgramSTTClient
 from app.tts.elevenlabs import ElevenLabsTTSClient
+from app.db.call_logger import CallLogger
 from app.workflow.engine import ActionResult, WorkflowEngine
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ class CallPipeline:
         greeting: str = GREETING,
         workflow: dict[str, Any] | None = None,
         engine: WorkflowEngine | None = None,
+        call_logger: CallLogger | None = None,
     ) -> None:
         self._ws = ws
         self._stream_sid = stream_sid
@@ -89,6 +91,7 @@ class CallPipeline:
         self._tts = tts or ElevenLabsTTSClient()
         self._system_prompt = system_prompt
         self._greeting = greeting
+        self._call_logger = call_logger
         self._messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
         ]
@@ -166,6 +169,12 @@ class CallPipeline:
         # Close STT and TTS clients
         await self._stt.close()
         await self._tts.close()
+
+        # Finalise call log
+        if self._call_logger:
+            self._call_logger.flush()
+            self._call_logger.finalise()
+
         logger.info("Pipeline closed — %d messages in history", len(self._messages))
 
     # ------------------------------------------------------------------
@@ -231,6 +240,9 @@ class CallPipeline:
     async def _handle_caller_utterance(self, transcript: str) -> None:
         """Process a complete caller utterance through LLM/engine."""
         self._messages.append({"role": "user", "content": transcript})
+        if self._call_logger:
+            self._call_logger.log_transcript(transcript)
+            self._call_logger.flush()
         if self._engine is not None:
             await self._generate_engine_response(transcript)
         else:
@@ -265,9 +277,15 @@ class CallPipeline:
             if full_response.strip():
                 self._messages.append({"role": "assistant", "content": full_response.strip()})
                 logger.info("Assistant: %s", full_response.strip())
+                if self._call_logger:
+                    self._call_logger.log_llm_response(full_response.strip())
+                    self._call_logger.flush()
 
         except Exception:
             logger.exception("Error generating LLM response")
+            if self._call_logger:
+                self._call_logger.log_error("LLM response generation failed")
+                self._call_logger.flush()
 
     async def _generate_engine_response(self, transcript: str) -> None:
         """Get a response from the WorkflowEngine and speak it."""
@@ -281,6 +299,12 @@ class CallPipeline:
                     logger.info("Engine action response: %s", response.message)
                     await self._speak(response.message)
                     self._messages.append({"role": "assistant", "content": response.message})
+                if self._call_logger:
+                    self._call_logger.log_action(
+                        response.action_type,
+                        {"message": response.message, "transfer_number": response.transfer_number or ""},
+                    )
+                    self._call_logger.flush()
                 if response.call_ended:
                     await self._handle_end_call()
                 elif response.transfer_number:
@@ -304,8 +328,14 @@ class CallPipeline:
                     logger.info("Engine remainder → TTS: %s", leftover)
                     await self._speak(leftover)
                 self._messages.append({"role": "assistant", "content": response_text})
+                if self._call_logger:
+                    self._call_logger.log_llm_response(response_text)
+                    self._call_logger.flush()
         except Exception:
             logger.exception("Error generating engine response")
+            if self._call_logger:
+                self._call_logger.log_error("Engine response generation failed")
+                self._call_logger.flush()
 
     async def _speak(self, text: str) -> None:
         """Synthesize text via TTS and send audio to Twilio."""

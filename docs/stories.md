@@ -539,12 +539,12 @@ Action nodes are extensible by `action_type`. This story ships the first two typ
 As a **dashboard developer**, I want **CRUD endpoints for workflows and read endpoints for call logs**, so that **the React frontend has a backend to talk to and workflows survive server restarts**.
 
 ### Acceptance criteria
-- [ ] Database schema (SQLModel) with tables:
+- [x] Database schema (SQLModel) with tables:
   - `workflows` — `id` (UUID), `name`, `version`, `graph_json` (full workflow JSON), `is_active` (bool), `phone_number` (nullable), `created_at`, `updated_at`.
   - `calls` — `id` (UUID), `call_sid`, `from_number`, `to_number`, `workflow_id` (FK, nullable), `started_at`, `ended_at`, `duration_seconds`.
   - `call_events` — `id`, `call_id` (FK), `timestamp`, `event_type` (enum: `transcript`, `llm_response`, `node_transition`, `summary_generated`, `action_executed`, `error`), `data_json`.
-- [ ] SQLite database created on startup (no migration tool needed for PoC).
-- [ ] REST API endpoints:
+- [x] SQLite database created on startup (no migration tool needed for PoC).
+- [x] REST API endpoints:
   - `GET /api/workflows` — list all workflows (id, name, is_active, updated_at).
   - `GET /api/workflows/{id}` — full workflow including `graph_json`.
   - `POST /api/workflows` — create a new workflow.
@@ -553,9 +553,9 @@ As a **dashboard developer**, I want **CRUD endpoints for workflows and read end
   - `DELETE /api/workflows/{id}` — delete a workflow.
   - `GET /api/calls` — list recent calls (id, from, to, workflow_name, started_at, duration).
   - `GET /api/calls/{id}` — full call detail including all events.
-- [ ] The voice pipeline logs events to `call_events` in real time during a call (node transitions, transcripts, LLM responses, summaries).
-- [ ] The pipeline loads the active workflow for the Twilio number from the database (instead of from a JSON file).
-- [ ] Input validation on all endpoints (Pydantic models). Invalid `graph_json` → 422.
+- [x] The voice pipeline logs events to `call_events` in real time during a call (node transitions, transcripts, LLM responses, summaries).
+- [x] The pipeline loads the active workflow for the Twilio number from the database (instead of from a JSON file).
+- [x] Input validation on all endpoints (Pydantic models). Invalid `graph_json` → 422.
 
 ### Unit tests
 - **CRUD:** create → read → update → read (verify changes) → delete → read (404).
@@ -574,8 +574,8 @@ As a **dashboard developer**, I want **CRUD endpoints for workflows and read end
 2. Auth on API endpoints now or defer to Story 13?
 
 **Recorded answers:**
-- Delete strategy: _unanswered_
-- Auth timing: _unanswered_
+- Delete strategy: Hard delete — row removed entirely. No recovery needed for PoC.
+- Auth timing: Defer to Story 13 — no auth on API endpoints for now.
 
 ---
 

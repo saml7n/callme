@@ -21,20 +21,23 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlmodel import Session, select
 
+from app.db.call_logger import CallLogger
+from app.db.models import Call, Workflow as WorkflowModel
+from app.db.session import get_session
 from app.pipeline import CallPipeline
 
 logger = logging.getLogger(__name__)
 
-# Default workflow JSON — loaded once at import time.
-# Set to None to fall back to Story 6 hardcoded prompt.
+# Fallback workflow JSON — loaded once from disk for when DB has no active workflow.
 _WORKFLOW_PATH = (
     Path(__file__).resolve().parent.parent.parent / "schemas" / "examples" / "reception_flow.json"
 )
-_DEFAULT_WORKFLOW: dict[str, Any] | None = None
+_FALLBACK_WORKFLOW: dict[str, Any] | None = None
 if _WORKFLOW_PATH.exists():
-    _DEFAULT_WORKFLOW = json.loads(_WORKFLOW_PATH.read_text())
-    logger.info("Loaded default workflow from %s", _WORKFLOW_PATH)
+    _FALLBACK_WORKFLOW = json.loads(_WORKFLOW_PATH.read_text())
+    logger.info("Loaded fallback workflow from %s", _WORKFLOW_PATH)
 
 router = APIRouter(tags=["twilio"])
 
@@ -95,6 +98,53 @@ def build_mark_message(stream_sid: str, name: str) -> str:
     return json.dumps({"event": "mark", "streamSid": stream_sid, "mark": {"name": name}})
 
 
+def _load_active_workflow() -> tuple[dict[str, Any] | None, Any]:
+    """Load the active workflow from the DB, with fallback to disk.
+
+    Returns (workflow_dict, workflow_db_id).
+    """
+    try:
+        session = next(get_session())
+        db_wf = session.exec(
+            select(WorkflowModel).where(WorkflowModel.is_active == True)  # noqa: E712
+        ).first()
+        if db_wf is not None:
+            logger.info("Loaded active workflow from DB: %s (id=%s)", db_wf.name, db_wf.id)
+            return db_wf.graph_json, db_wf.id
+    except Exception:
+        logger.exception("Failed to load workflow from DB")
+
+    if _FALLBACK_WORKFLOW is not None:
+        logger.info("Using fallback workflow from disk")
+        return _FALLBACK_WORKFLOW, None
+    return None, None
+
+
+def _create_call_record(
+    call_sid: str,
+    from_number: str,
+    to_number: str,
+    workflow_id: Any | None,
+) -> Call | None:
+    """Create a Call record in the database. Returns the Call or None on error."""
+    try:
+        session = next(get_session())
+        call = Call(
+            call_sid=call_sid,
+            from_number=from_number,
+            to_number=to_number,
+            workflow_id=workflow_id,
+        )
+        session.add(call)
+        session.commit()
+        session.refresh(call)
+        logger.info("Created call record %s for call_sid=%s", call.id, call_sid)
+        return call
+    except Exception:
+        logger.exception("Failed to create call record")
+        return None
+
+
 @router.websocket("/twilio/media-stream")
 async def media_stream(ws: WebSocket) -> None:
     """Handle a bidirectional Twilio media stream WebSocket connection."""
@@ -122,14 +172,27 @@ async def media_stream(ws: WebSocket) -> None:
                 )
                 # Start the full voice pipeline
                 try:
+                    # Load active workflow from DB (falls back to disk)
+                    workflow_dict, workflow_db_id = _load_active_workflow()
+
+                    # Create a call record in the database
+                    call_record = _create_call_record(
+                        call_sid=state.call_sid,
+                        from_number="",  # populated by Twilio webhook if needed
+                        to_number="",
+                        workflow_id=workflow_db_id,
+                    )
+                    call_logger = CallLogger(call_record.id) if call_record else None
+
                     pipeline = CallPipeline(
                         ws=ws,
                         stream_sid=state.stream_sid,
                         call_sid=state.call_sid,
-                        workflow=_DEFAULT_WORKFLOW,
+                        workflow=workflow_dict,
+                        call_logger=call_logger,
                     )
                     await pipeline.start()
-                    logger.info("CallPipeline started for call %s (workflow=%s)", state.call_sid, "yes" if _DEFAULT_WORKFLOW else "no")
+                    logger.info("CallPipeline started for call %s (workflow=%s)", state.call_sid, "yes" if workflow_dict else "no")
                 except Exception:
                     logger.exception("Failed to start CallPipeline")
                     pipeline = None
