@@ -26,6 +26,10 @@ Story 0: Decisions (no code)
                     → Story 12: Call log viewer
                       → Story 13: Polish — interruptions, filler phrases, error handling, auth
                         → Story 14: Phone number management & publish controls
+                          → Story 15: Action integrations — Google Calendar & webhook
+                            → Story 16: Integration picker panel for action nodes
+                              → Story 17: Quickstart wizard & onboarding
+                                → Story 18: Live call monitor & human takeover
 ```
 
 ---
@@ -773,3 +777,244 @@ As an **admin**, I want **a phone number registry so I can see which numbers are
 
 ### Blocked until answered
 *(none)*
+---
+
+## Story 15 — Action integrations: Google Calendar & generic webhook
+
+As a **workflow builder**, I want **action nodes that can call external services — starting with Google Calendar (check/book slots) and a generic webhook (POST to any URL)** — so that **the AI receptionist can do real work during a call, not just talk**.
+
+### Acceptance criteria
+
+#### Integration registry (server)
+- [ ] New `integrations` table: `id`, `type` (`google_calendar` | `webhook`), `name` (user label), `config_json` (encrypted credentials/URLs), `created_at`.
+- [ ] `GET /api/integrations` — list all configured integrations (credentials redacted).
+- [ ] `POST /api/integrations` — create an integration. Validates config per type.
+- [ ] `PUT /api/integrations/{id}` — update config. `DELETE /api/integrations/{id}` — remove (blocked if referenced by an active workflow).
+- [ ] `POST /api/integrations/{id}/test` — performs a dry-run connection test (e.g. list calendars, ping webhook URL) and returns success/failure.
+
+#### Google Calendar integration
+- [ ] Config fields: `service_account_json` or OAuth refresh token, `calendar_id`.
+- [ ] Runtime actions exposed to the workflow engine:
+  - `check_availability` — given a date range (extracted by LLM), returns free/busy slots.
+  - `book_appointment` — given a slot + caller name + notes, creates a calendar event.
+- [ ] The workflow engine can invoke these mid-conversation via a new `integration` action type on action nodes.
+
+#### Generic webhook integration
+- [ ] Config fields: `url`, `method` (POST/PUT), `headers` (key-value), optional `auth_header`.
+- [ ] Runtime action: `call_webhook` — sends a JSON payload built from the conversation context (caller number, extracted info, transcript summary). Returns the response body to the conversation context so the LLM can use it.
+- [ ] Timeout: 5s. On failure, the engine injects an error message into the conversation context and continues (doesn't crash the call).
+
+#### Workflow schema changes
+- [ ] Action nodes gain a new `action_type: "integration"` option alongside `end_call` and `transfer`.
+- [ ] When `action_type` is `integration`, the node data includes `integration_id` and `integration_action` (e.g. `check_availability`, `book_appointment`, `call_webhook`).
+- [ ] The engine pauses the conversation, executes the integration, injects the result into context, and then either continues to the next node or lets the LLM respond with the result.
+
+### Unit tests
+- **Google Calendar:** Mock Google API → `check_availability` returns slots. `book_appointment` creates event. API failure → graceful error message.
+- **Webhook:** Mock HTTP → successful POST returns body. Timeout → error injected. Non-2xx → error injected.
+- **Engine:** Action node with `integration` type → calls the integration, result appears in conversation context.
+- **API:** CRUD integrations. Test endpoint returns success/failure. Delete blocked if in-use.
+
+### QA verification
+1. Set up a Google Calendar integration with a test service account.
+2. Build a workflow: greeting → "Would you like to book an appointment?" → check availability → offer slots → book → confirmation → end call.
+3. Call the number → AI checks calendar, offers real available slots, books on confirmation. Verify event appears in Google Calendar.
+4. Set up a webhook integration pointing to a Request Bin.
+5. Build a workflow with a webhook action → call → verify payload arrives at Request Bin.
+6. Disable webhook URL → call → AI gracefully says "I couldn't complete that action" and continues.
+
+### Blocked until answered
+1. Google Calendar auth: service account (simpler, no user OAuth flow) or OAuth consent (more realistic for end users)?
+2. Should integration credentials be encrypted at rest in SQLite, or is that overkill for PoC?
+
+**Recorded answers:**
+- Calendar auth: _unanswered_
+- Credential encryption: _unanswered_
+
+---
+
+## Story 16 — Integration picker panel for action nodes
+
+As a **workflow builder**, I want **the action node config panel to let me browse configured integrations and pick an action from a dropdown**, so that **I don't have to type integration IDs or remember API details**.
+
+### Acceptance criteria
+
+#### Config panel changes
+- [ ] When `action_type` is set to `integration` in the action node config panel, a new section appears:
+  - **Integration** dropdown — lists all integrations from `GET /api/integrations`, grouped by type (Google Calendar, Webhook).
+  - **Action** dropdown — dynamically populated based on the selected integration type:
+    - Google Calendar: `Check Availability`, `Book Appointment`.
+    - Webhook: `Call Webhook`.
+  - **Action parameters** — type-specific fields rendered below:
+    - `check_availability`: date range hint (text, e.g. "Ask the caller for their preferred day").
+    - `book_appointment`: fields to map (caller name source, notes source — from conversation context).
+    - `call_webhook`: optional payload template (JSON editor or key-value pairs).
+- [ ] The node preview on the canvas shows the integration name + action (e.g. "📅 Google Calendar → Book Appointment").
+- [ ] Validation: if integration is selected but the referenced integration has been deleted, show a warning badge.
+
+#### Integration management link
+- [ ] A `/settings/integrations` page lists configured integrations with add/edit/delete/test.
+- [ ] The config panel includes a "Manage integrations →" link that opens the settings page in a new tab.
+
+### Unit tests
+- **Config panel:** Selecting `integration` action type shows integration dropdown. Selecting an integration shows its available actions. Selecting an action shows parameter fields. Integration dropdown is grouped by type.
+- **Node preview:** Integration action node shows integration name + action label.
+- **Validation:** Deleted integration on a node → warning badge rendered.
+
+### QA verification (Playwright)
+1. Create a Google Calendar integration and a webhook integration in settings.
+2. Open workflow builder → add an action node → set type to `integration`.
+3. Select the Calendar integration → pick "Book Appointment" → parameter fields appear.
+4. Switch to webhook → pick "Call Webhook" → payload template appears.
+5. Save workflow → reload → integration config persisted correctly.
+6. Delete the webhook integration → open workflow → node shows "Integration not found" warning.
+
+### Blocked until answered
+*(none)*
+
+---
+
+## Story 17 — Quickstart wizard & self-service onboarding
+
+As a **new user setting up their own instance**, I want **a guided setup wizard that walks me through entering my API keys, connecting my Twilio number, and deploying my first workflow**, so that **I can go from zero to a working AI receptionist in under 10 minutes**.
+
+### Acceptance criteria
+
+#### Setup credentials store (server)
+- [ ] New `settings` table: `key` (unique string), `value` (encrypted text), `updated_at`. Used for API keys and service config.
+- [ ] `GET /api/settings` — returns all setting keys with values redacted (shows `••••` + last 4 chars). Never returns full secrets.
+- [ ] `PUT /api/settings` — bulk upsert settings. Accepts: `twilio_account_sid`, `twilio_auth_token`, `deepgram_api_key`, `elevenlabs_api_key`, `openai_api_key`, `admin_phone_number`.
+- [ ] `POST /api/settings/validate` — tests each configured service:
+  - Twilio: `GET /2010-04-01/Accounts/{sid}` → valid account.
+  - Deepgram: `GET /v1/projects` → valid key.
+  - ElevenLabs: `GET /v1/voices` → valid key.
+  - OpenAI: `GET /v1/models` → valid key.
+  - Returns per-service status: `{ "twilio": "ok", "deepgram": "ok", ... }`.
+- [ ] On server startup, if settings are missing, the pipeline logs a clear warning but doesn't crash. The quickstart wizard is the intended path to configure them.
+- [ ] `admin_phone_number` — the admin's mobile number for receiving live-call alerts (Story 18).
+- [ ] All runtime code (STT, TTS, LLM, Twilio clients) reads credentials from the settings store instead of (or falling back to) environment variables. Env vars take precedence if set (for Docker/CI).
+
+#### Web — Quickstart wizard
+- [ ] First visit to the app (no settings configured) auto-redirects to `/setup`.
+- [ ] The wizard is a multi-step form:
+  1. **Welcome** — "Welcome to CallMe! Let's get your AI receptionist running." Overview of what's needed.
+  2. **API Keys** — fields for Twilio SID + Auth Token, Deepgram key, ElevenLabs key, OpenAI key. Each field has a "Where do I find this?" expandable hint with a direct link to the provider's dashboard. A "Validate All" button tests each key and shows green ✓ / red ✗ per service.
+  3. **Phone Number** — "Enter the Twilio phone number you want to use" (E.164). Validates it belongs to the Twilio account. Also: "Enter your mobile number" for admin alerts. Explains: "We'll text you when a live call comes in."
+  4. **First Workflow** — Choose from a template gallery (2-3 starter templates: "Simple Receptionist", "Appointment Booking", "FAQ Bot") or "Start from scratch". Selecting a template pre-populates the workflow builder.
+  5. **Publish & Test** — One-click publish to the phone number from step 3. Shows: "Call {number} now to test!" with a live status indicator.
+- [ ] Progress bar across the top. Steps can be revisited. Settings are saved incrementally (not all-or-nothing).
+- [ ] After completing setup, subsequent visits go to the dashboard (workflow list). A "Setup" link in the nav allows re-running the wizard.
+
+#### Starter templates
+- [ ] Templates stored as JSON files in `schemas/templates/`.
+- [ ] `GET /api/templates` — returns list of available templates with name, description, and preview image/icon.
+- [ ] Selecting a template in the wizard or workflow list creates a new workflow pre-populated with the template's graph.
+
+#### Documentation
+- [ ] `README.md` updated with:
+  - Prerequisites (accounts needed: Twilio, Deepgram, ElevenLabs, OpenAI).
+  - Links to sign up for each service (free tiers where applicable).
+  - "Get Started" section: `git clone`, `docker compose up`, open `http://localhost:5173`, follow the wizard.
+  - Environment variable reference (still supported as override).
+- [ ] In-app: every API key field has a tooltip/link explaining where to get the key.
+
+### Unit tests
+- **Settings API:** PUT saves settings. GET returns redacted values. Validate returns per-service status (mock HTTP). Missing key → validate returns `"not_configured"`.
+- **Startup:** Server starts with no settings configured → logs warning, doesn't crash.
+- **Templates:** GET /api/templates returns list. Creating workflow from template → correct graph.
+- **Wizard:** Each step renders. Validate button calls API and shows per-service status. Completing step 5 → redirects to workflow list.
+
+### QA verification (Playwright)
+1. Fresh database (no settings) → navigate to `/` → auto-redirected to `/setup`.
+2. Enter API keys → click "Validate All" → all green (using real keys).
+3. Enter Twilio number + admin mobile → validated.
+4. Select "Simple Receptionist" template → workflow created.
+5. Click "Publish & Test" → workflow active. Call the number → AI answers.
+6. Navigate away and back → goes to `/workflows` (not back to wizard).
+7. Click "Setup" in nav → wizard with pre-filled (redacted) values.
+
+### Blocked until answered
+1. Should templates be editable after creation, or are they read-only starting points?
+2. Docker Compose setup: single `docker compose up` for server + web + SQLite, or separate services?
+
+**Recorded answers:**
+- Templates: _unanswered_
+- Docker: _unanswered_
+
+---
+
+## Story 18 — Live call monitor & human takeover
+
+As an **admin**, I want **to see when a call is active, read the live transcript, and optionally take over the conversation by typing responses that are spoken to the caller**, so that **I can intervene when the AI is struggling — without needing a mobile app**.
+
+### Acceptance criteria
+
+#### Server — WebSocket event bus
+- [ ] New WebSocket endpoint: `GET /ws/calls/live` — streams real-time events for all active calls.
+- [ ] Events pushed to the WebSocket:
+  - `call_started` — `{ call_id, caller_number, workflow_name, timestamp }`.
+  - `transcript` — `{ call_id, role: "caller"|"ai", text, timestamp }`.
+  - `node_transition` — `{ call_id, from_node, to_node, timestamp }`.
+  - `call_ended` — `{ call_id, duration, timestamp }`.
+- [ ] Multiple dashboard clients can connect simultaneously (broadcast).
+
+#### Server — Human takeover API
+- [ ] `POST /api/calls/{call_id}/takeover` — switches the call to **human mode**:
+  - Pauses the LLM pipeline (stops generating AI responses).
+  - Injects a brief TTS message: *"One moment please, I'm connecting you with a team member."*
+  - Returns `200` with confirmation, or `404` if the call has ended.
+- [ ] `POST /api/calls/{call_id}/message` — sends a text message to be spoken to the caller via TTS.
+  - Only works when in human mode. Returns `409` if call is still in AI mode.
+  - Body: `{ "text": "Hi, this is Sam. I saw you were asking about appointments..." }`.
+- [ ] `POST /api/calls/{call_id}/release` — returns the call to AI mode. The LLM resumes with full context (including the human messages).
+- [ ] Human-mode messages are added to the conversation history so the LLM has continuity when resumed.
+
+#### Server — Admin SMS alerts
+- [ ] When a call starts, if `admin_phone_number` is configured, send an SMS via Twilio: *"📞 Incoming call from +44... on Dental Reception. View: {dashboard_url}/calls/live"*.
+- [ ] SMS includes a deep link to the live call monitor.
+- [ ] Rate-limited: max 1 SMS per 60 seconds to avoid spam during high call volume.
+
+#### Web — Live calls dashboard
+- [ ] A page at `/calls/live` shows all active calls in real-time.
+- [ ] Each active call card shows:
+  - Caller number (masked), workflow name, duration (ticking), current node.
+  - Live transcript scrolling as it arrives (caller messages left, AI messages right).
+  - Status badge: "AI Active" (indigo) or "Human Mode" (green).
+- [ ] "Take Over" button on each card → calls `/api/calls/{call_id}/takeover`.
+- [ ] When in human mode:
+  - A text input appears at the bottom of the transcript.
+  - Admin types a message → POST `/api/calls/{call_id}/message` → message appears in transcript and is spoken to the caller.
+  - "Return to AI" button → POST `/api/calls/{call_id}/release`.
+- [ ] When a call ends, the card fades out and a "View call log" link appears.
+- [ ] Empty state: "No active calls. Waiting for incoming calls…" with a subtle pulse animation.
+
+#### Web — Nav & notifications
+- [ ] Nav bar shows a "Live" indicator with active call count badge (red dot when > 0).
+- [ ] Browser notification (with permission) when a new call starts: "Incoming call from +44... on Dental Reception".
+
+### Unit tests
+- **WebSocket:** Connect → receive `call_started` when a call begins. Receive `transcript` events in order. `call_ended` when call finishes. Multiple clients receive the same events.
+- **Takeover:** POST `/takeover` → call switches to human mode. POST `/message` in human mode → text sent to TTS. POST `/message` in AI mode → 409. POST `/release` → call returns to AI mode with context preserved.
+- **SMS:** Call started with admin number configured → Twilio SMS sent (mock). Rate limit: two calls within 60s → only one SMS.
+- **Web:** Live call card renders with transcript. Take Over button calls API and switches UI to human mode. Type message → POST sent. Release → UI reverts to AI mode.
+
+### QA verification
+1. Configure admin phone number in setup wizard.
+2. Open `/calls/live` in browser → "No active calls".
+3. Call the Twilio number from a phone → card appears with live transcript streaming.
+4. Receive SMS on admin phone with deep link.
+5. Click "Take Over" → AI pauses, caller hears "One moment please…".
+6. Type a message in the dashboard → caller hears it spoken.
+7. Click "Return to AI" → AI resumes with context. Verify AI knows what happened during human mode.
+8. Call ends → card fades, "View call log" link works.
+9. Open on mobile browser → layout is responsive, takeover works from phone browser.
+
+### Blocked until answered
+1. Should the admin SMS include full caller number or masked?
+2. TTS voice for human-typed messages: same workflow voice, or a distinct "operator" voice?
+3. Should there be a timeout that auto-releases human mode back to AI if the admin doesn't type for N seconds?
+
+**Recorded answers:**
+- SMS caller number: _unanswered_
+- Takeover TTS voice: _unanswered_
+- Auto-release timeout: _unanswered_
