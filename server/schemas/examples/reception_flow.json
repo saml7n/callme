@@ -1,0 +1,120 @@
+{
+  "id": "wf_reception",
+  "name": "Dental Reception Flow",
+  "version": 1,
+  "entry_node_id": "greeting",
+  "nodes": [
+    {
+      "id": "greeting",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are a friendly receptionist for Smile Dental. Greet the caller warmly and ask how you can help today. Find out what they need — are they looking to book an appointment, do they have a question, or would they like to speak to someone? Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Hi there" },
+          { "role": "assistant", "content": "Hello! Welcome to Smile Dental. How can I help you today?" },
+          { "role": "user", "content": "I'm calling about my teeth" },
+          { "role": "assistant", "content": "Of course! Are you looking to book an appointment, or do you have a question about our services?" }
+        ],
+        "max_iterations": 5
+      },
+      "position": { "x": 300, "y": 0 }
+    },
+    {
+      "id": "intent_router",
+      "type": "decision",
+      "data": {
+        "instruction": "Based on the conversation so far, determine the caller's primary intent. Are they looking to book an appointment, asking a general question about services/prices/hours, or requesting to speak with a human staff member?"
+      },
+      "position": { "x": 300, "y": 200 }
+    },
+    {
+      "id": "book_appointment",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are helping the caller book a dental appointment at Smile Dental. Collect the following information: their full name, preferred date and time (available Monday-Friday 9am-5pm), and the type of service they need (cleaning, checkup, filling, or whitening). Confirm the details back to them. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "I'd like a cleaning next Tuesday" },
+          { "role": "assistant", "content": "Great! I can help with that. Could I get your full name please?" },
+          { "role": "user", "content": "John Smith" },
+          { "role": "assistant", "content": "Thanks, John! What time works best for you on Tuesday? We have slots from 9am to 5pm." }
+        ],
+        "max_iterations": 10
+      },
+      "position": { "x": 50, "y": 400 }
+    },
+    {
+      "id": "general_inquiry",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are answering general questions about Smile Dental. Services offered: cleanings ($80), checkups ($60), fillings ($150-300), and teeth whitening ($250). Hours: Monday to Friday, 9am to 5pm. Location: 123 Dental Street. Accept most dental insurance plans. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "How much is a cleaning?" },
+          { "role": "assistant", "content": "A standard cleaning is $80. Would you like to book one?" },
+          { "role": "user", "content": "What are your hours?" },
+          { "role": "assistant", "content": "We're open Monday to Friday, 9am to 5pm. Is there anything else I can help with?" }
+        ],
+        "max_iterations": 10
+      },
+      "position": { "x": 300, "y": 400 }
+    },
+    {
+      "id": "speak_to_human",
+      "type": "conversation",
+      "data": {
+        "instructions": "The caller would like to speak with a human staff member. Let them know you'll connect them, and ask if there's anything specific they'd like the staff member to know so the handoff is smooth. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Can I talk to a real person?" },
+          { "role": "assistant", "content": "Of course! I'll connect you with one of our team members. Is there anything specific you'd like me to let them know?" },
+          { "role": "user", "content": "I have a billing question" },
+          { "role": "assistant", "content": "Got it, I'll let them know it's about billing. Let me transfer you now." }
+        ],
+        "max_iterations": 5
+      },
+      "position": { "x": 550, "y": 400 }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_greeting_to_router",
+      "source": "greeting",
+      "target": "intent_router",
+      "label": "Caller has stated their need or intent"
+    },
+    {
+      "id": "e_router_to_booking",
+      "source": "intent_router",
+      "target": "book_appointment",
+      "label": "Caller wants to book an appointment"
+    },
+    {
+      "id": "e_router_to_inquiry",
+      "source": "intent_router",
+      "target": "general_inquiry",
+      "label": "Caller has a general question about services, prices, or hours"
+    },
+    {
+      "id": "e_router_to_human",
+      "source": "intent_router",
+      "target": "speak_to_human",
+      "label": "Caller wants to speak with a human staff member"
+    },
+    {
+      "id": "e_booking_to_router",
+      "source": "book_appointment",
+      "target": "intent_router",
+      "label": "Caller changes topic — wants to ask a question or speak to someone instead"
+    },
+    {
+      "id": "e_inquiry_to_router",
+      "source": "general_inquiry",
+      "target": "intent_router",
+      "label": "Caller changes topic — wants to book an appointment or speak to someone instead"
+    },
+    {
+      "id": "e_human_to_router",
+      "source": "speak_to_human",
+      "target": "intent_router",
+      "label": "Caller changes their mind — wants to book or ask a question instead"
+    }
+  ]
+}

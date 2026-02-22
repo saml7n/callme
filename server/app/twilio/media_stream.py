@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Default workflow JSON — loaded once at import time.
 # Set to None to fall back to Story 6 hardcoded prompt.
 _WORKFLOW_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "schemas" / "examples" / "simple_receptionist.json"
+    Path(__file__).resolve().parent.parent.parent / "schemas" / "examples" / "reception_flow.json"
 )
 _DEFAULT_WORKFLOW: dict[str, Any] | None = None
 if _WORKFLOW_PATH.exists():

@@ -162,7 +162,7 @@ class CallPipeline:
         """Background loop: listen for transcript events and generate responses.
 
         Triggers on speech_final immediately. If only is_final events arrive
-        (speech_final missing), a 1.5s debounce timer fires as a fallback.
+        (speech_final missing), a 0.7s debounce timer fires as a fallback.
         """
         try:
             async for event in self._stt.receive_transcripts():
@@ -183,11 +183,11 @@ class CallPipeline:
                             event.transcript,
                         )
                         # Start/reset debounce timer — if speech_final doesn't
-                        # arrive within 1.5s, treat this is_final as the utterance.
+                        # arrive within 0.3s, treat this is_final as the utterance.
                         self._cancel_debounce()
                         transcript = event.transcript
                         self._final_debounce_task = asyncio.create_task(
-                            self._debounced_handle(transcript, delay=1.5)
+                            self._debounced_handle(transcript, delay=0.3)
                         )
                     else:
                         logger.debug(

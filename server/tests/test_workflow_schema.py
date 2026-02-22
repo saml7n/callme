@@ -4,6 +4,7 @@ import pytest
 
 from app.workflow.schema import (
     ConversationNodeData,
+    DecisionNodeData,
     NodeType,
     Workflow,
     WorkflowEdge,
@@ -161,3 +162,65 @@ class TestWorkflowValidation:
         """Missing top-level fields → Pydantic error."""
         with pytest.raises(Exception):
             Workflow(id="w", name="X")  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# Decision node data
+# ---------------------------------------------------------------------------
+
+class TestDecisionNodeData:
+    def test_valid_decision_data(self):
+        data = DecisionNodeData(instruction="Determine caller intent.")
+        assert data.instruction == "Determine caller intent."
+
+    def test_empty_instruction_rejected(self):
+        with pytest.raises(Exception):
+            DecisionNodeData(instruction="")
+
+
+# ---------------------------------------------------------------------------
+# Decision node in workflow
+# ---------------------------------------------------------------------------
+
+class TestDecisionNodeWorkflow:
+    def test_workflow_with_decision_node_parses(self):
+        wf = Workflow(**{
+            "id": "wf_d",
+            "name": "Decision Test",
+            "version": 1,
+            "entry_node_id": "n1",
+            "nodes": [
+                {"id": "n1", "type": "conversation", "data": {"instructions": "Greet."}},
+                {"id": "d1", "type": "decision", "data": {"instruction": "Route."}},
+                {"id": "n2", "type": "conversation", "data": {"instructions": "Book."}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "n1", "target": "d1", "label": "Done greeting"},
+                {"id": "e2", "source": "d1", "target": "n2", "label": "Book"},
+            ],
+        })
+        assert len(wf.nodes) == 3
+        assert wf.nodes[1].type == NodeType.decision
+
+    def test_decision_node_get_decision_data(self):
+        node = WorkflowNode(
+            id="d1",
+            type=NodeType.decision,
+            data={"instruction": "Evaluate intent."},
+        )
+        d = node.get_decision_data()
+        assert d.instruction == "Evaluate intent."
+
+    def test_decision_node_invalid_data_raises(self):
+        """Decision node with missing instruction → validation error."""
+        with pytest.raises(Exception):
+            Workflow(**{
+                "id": "wf_bad",
+                "name": "Bad",
+                "version": 1,
+                "entry_node_id": "d1",
+                "nodes": [
+                    {"id": "d1", "type": "decision", "data": {}},
+                ],
+                "edges": [],
+            })

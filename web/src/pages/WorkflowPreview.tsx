@@ -13,11 +13,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import ConversationNode from '../components/nodes/ConversationNode'
+import DecisionNode from '../components/nodes/DecisionNode'
 
 const API_BASE = 'http://localhost:3000'
 
 const nodeTypes = {
   conversation: ConversationNode,
+  decision: DecisionNode,
 }
 
 interface WorkflowData {

@@ -22,7 +22,7 @@ _WORKFLOW_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "schemas"
     / "examples"
-    / "simple_receptionist.json"
+    / "reception_flow.json"
 )
 
 

@@ -12,7 +12,8 @@ class NodeType(str, Enum):
     """Supported workflow node types."""
 
     conversation = "conversation"
-    # decision and action will be added in Stories 8 and 9
+    decision = "decision"
+    # action will be added in Story 9
 
 
 class ConversationNodeData(BaseModel):
@@ -27,6 +28,16 @@ class ConversationNodeData(BaseModel):
     )
     max_iterations: int = Field(
         default=10, ge=1, description="Max conversation turns before forcing transition."
+    )
+
+
+class DecisionNodeData(BaseModel):
+    """Data payload for a decision node (pure routing, no caller interaction)."""
+
+    instruction: str = Field(
+        ...,
+        min_length=1,
+        description="Guidance for the Router LLM on what to evaluate.",
     )
 
 
@@ -50,6 +61,10 @@ class WorkflowNode(BaseModel):
     def get_conversation_data(self) -> ConversationNodeData:
         """Parse and validate data as ConversationNodeData."""
         return ConversationNodeData(**self.data)
+
+    def get_decision_data(self) -> DecisionNodeData:
+        """Parse and validate data as DecisionNodeData."""
+        return DecisionNodeData(**self.data)
 
 
 class WorkflowEdge(BaseModel):
@@ -104,6 +119,8 @@ class Workflow(BaseModel):
         for node in self.nodes:
             if node.type == NodeType.conversation:
                 node.get_conversation_data()  # raises on invalid data
+            elif node.type == NodeType.decision:
+                node.get_decision_data()  # raises on invalid data
 
         return self
 

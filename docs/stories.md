@@ -429,22 +429,22 @@ As a **caller**, I want **the AI to route my call through different conversation
 This story adds **decision nodes** and proves multi-node workflows with context (summary + key info) passing between nodes.
 
 ### Acceptance criteria
-- [ ] Decision node type (`type: "decision"`) added to the workflow schema:
+- [x] Decision node type (`type: "decision"`) added to the workflow schema:
   - `data.instruction` (str) — guidance for the Router LLM on what to evaluate (e.g. *"Determine the caller's primary intent"*).
   - Multiple outgoing edges, each with a `label` describing the condition (e.g. *"Caller wants to book an appointment"*).
   - No conversation with the caller — a decision node is purely routing logic.
-- [ ] When the engine enters a decision node:
+- [x] When the engine enters a decision node:
   1. The Router LLM evaluates accumulated context (summaries + key info from previous nodes) against the outgoing edge labels.
   2. Picks the best matching edge.
   3. Immediately transitions to the target node — **no response is spoken** from the decision node itself.
-- [ ] Context passing across multi-node workflows:
+- [x] Context passing across multi-node workflows:
   - On leaving a conversation node, a `NodeSummary` is generated: `{ summary: str, key_info: dict }`.
   - Summaries accumulate as the call moves through the graph.
   - Each new conversation node receives the accumulated summaries as a context prefix before its own instructions.
   - Per-node chat history is fresh (not carried over — only summaries cross boundaries).
-- [ ] A sample multi-node workflow at `server/schemas/examples/reception_flow.json` with at least 5 nodes:
+- [x] A sample multi-node workflow at `server/schemas/examples/reception_flow.json` with at least 5 nodes:
   - Greeting (conversation) → Intent router (decision) → Book appointment (conversation) / General inquiry (conversation) / Speak to human (conversation).
-- [ ] The workflow is loaded into the voice pipeline and testable via a real phone call.
+- [x] The workflow is loaded into the voice pipeline and testable via a real phone call.
 
 ### Unit tests (mocked LLM)
 - **Decision node:** Router evaluates accumulated context → picks the correct edge based on labels.
@@ -467,6 +467,14 @@ This story adds **decision nodes** and proves multi-node workflows with context 
 4. **Phone call — inquiry path**: Hang up. Call again, say *"I have a question about your prices"* → AI routes to the general inquiry node, discusses services and pricing.
 5. **Phone call — transfer path**: Call again, say *"Can I speak to someone?"* → AI routes to the "speak to human" node.
 6. In each case, verify the AI's responses match the target node's instructions (not generic fallback).
+7. **Automated QA** (`scripts/qa_workflow.py`): 7 tests, 27 assertions — all passed ✓
+   - Test 1 — Direct booking path: greeting → intent_router → book_appointment ✓
+   - Test 2 — Inquiry path: greeting → intent_router → general_inquiry (with pricing data) ✓
+   - Test 3 — Speak to human path: greeting → intent_router → speak_to_human ✓
+   - Test 4 — Re-route booking → inquiry: changed topic mid-booking, re-routed via intent_router ✓
+   - Test 5 — Scope enforcement: booking node deflected off-topic question correctly ✓
+   - Test 6 — Context carries across nodes: caller name captured in summary, passed to booking node ✓
+   - Test 7 — Re-route inquiry → booking: asked about prices then booked, re-routed correctly ✓
 
 ### Blocked until answered
 - None (builds on Story 7 decisions).

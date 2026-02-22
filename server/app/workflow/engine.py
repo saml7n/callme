@@ -7,6 +7,7 @@ Uses two LLM roles:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from typing import Any
 from app.llm.openai import LLMClient
 from app.workflow.schema import (
     ConversationNodeData,
+    DecisionNodeData,
     NodeType,
     Workflow,
     WorkflowEdge,
@@ -73,6 +75,26 @@ Context from the call so far:
 ---
 """
 
+DECISION_ROUTER_PROMPT = """\
+You are a routing assistant for a phone call workflow. You are at a decision node that must route the call to the correct next step.
+
+Decision instruction: "{instruction}"
+
+Context from the call so far:
+{context}
+
+The caller's most recent message (this is what triggered the routing decision):
+"{last_utterance}"
+
+Available edges (transitions):
+{edges_text}
+
+Rules:
+- Focus primarily on the caller's MOST RECENT message to determine their current intent.
+- Prior context is background information — the latest utterance reflects what the caller wants NOW.
+- Respond with ONLY the edge ID (e.g. "e1") — nothing else.
+"""
+
 
 class WorkflowEngine:
     """State machine that drives a call through a workflow graph.
@@ -100,6 +122,7 @@ class WorkflowEngine:
         self._node_histories: dict[str, list[dict[str, str]]] = {}
         self._summaries: list[NodeSummary] = []
         self._iteration_count: int = 0
+        self._lock = asyncio.Lock()
 
     @property
     def current_node(self) -> WorkflowNode:
@@ -116,8 +139,17 @@ class WorkflowEngine:
     # ------------------------------------------------------------------
 
     async def start(self) -> str:
-        """Enter the entry node and return an initial response."""
+        """Enter the entry node and return an initial response.
+
+        If the entry node is a decision node, silently route through it
+        until we reach a conversation node.
+        """
         self._enter_node(self._current_node)
+
+        # If entry is a decision node, route through it first
+        if self._current_node.type == NodeType.decision:
+            return await self._route_through_decisions()
+
         response = await self._call_responder()
         self._append_history("assistant", response)
         logger.info("Engine started at node '%s': %s", self._current_node.id, response)
@@ -131,44 +163,60 @@ class WorkflowEngine:
         2. Router LLM: STAY or transition?
         3. If STAY → Responder generates reply.
         4. If transition → summarise, move to new node, Responder generates reply.
+
+        Uses a lock to prevent concurrent calls from interleaving with
+        in-flight transitions (e.g. decision node routing).
         """
-        self._append_history("user", transcript)
-        self._iteration_count += 1
+        async with self._lock:
+            # If we're on a decision node (transition was interrupted or
+            # a previous call left us here), route through it first.
+            if self._current_node.type == NodeType.decision:
+                logger.info(
+                    "handle_input called on decision node '%s' — routing through first",
+                    self._current_node.id,
+                )
+                response = await self._route_through_decisions()
+                # Now we're on a conversation node — add the transcript and continue
+                self._append_history("user", transcript)
+                self._iteration_count += 1
+            else:
+                self._append_history("user", transcript)
+                self._iteration_count += 1
 
-        # Check max_iterations
-        outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
-        conv_data = self._current_node.get_conversation_data()
-        if self._iteration_count >= conv_data.max_iterations and outgoing:
-            logger.info(
-                "Max iterations (%d) reached at node '%s' — forcing transition",
-                conv_data.max_iterations,
-                self._current_node.id,
-            )
-            return await self._transition(outgoing[0])
+            # Check max_iterations
+            outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+            conv_data = self._current_node.get_conversation_data()
+            if self._iteration_count >= conv_data.max_iterations and outgoing:
+                logger.info(
+                    "Max iterations (%d) reached at node '%s' — forcing transition",
+                    conv_data.max_iterations,
+                    self._current_node.id,
+                )
+                return await self._transition(outgoing[0])
 
-        # Ask Router
-        decision = await self._call_router(outgoing)
+            # Ask Router
+            decision = await self._call_router(outgoing)
 
-        if decision == "STAY" or not outgoing:
-            response = await self._call_responder()
-            self._append_history("assistant", response)
-            logger.info("Router: STAY at '%s'", self._current_node.id)
-            return response, False
+            if decision == "STAY" or not outgoing:
+                response = await self._call_responder()
+                self._append_history("assistant", response)
+                logger.info("Router: STAY at '%s'", self._current_node.id)
+                return response, False
 
-        # Find the matching edge
-        edge = self._find_edge(decision, outgoing)
-        if edge is None:
-            # Router returned something unexpected — stay
-            logger.warning(
-                "Router returned unknown decision '%s' — staying at '%s'",
-                decision,
-                self._current_node.id,
-            )
-            response = await self._call_responder()
-            self._append_history("assistant", response)
-            return response, False
+            # Find the matching edge
+            edge = self._find_edge(decision, outgoing)
+            if edge is None:
+                # Router returned something unexpected — stay
+                logger.warning(
+                    "Router returned unknown decision '%s' — staying at '%s'",
+                    decision,
+                    self._current_node.id,
+                )
+                response = await self._call_responder()
+                self._append_history("assistant", response)
+                return response, False
 
-        return await self._transition(edge)
+            return await self._transition(edge)
 
     # ------------------------------------------------------------------
     # Router LLM
@@ -214,7 +262,7 @@ class WorkflowEngine:
         """Build the full message list for the Responder LLM."""
         messages: list[dict[str, str]] = []
 
-        # System prompt: accumulated summaries + node instructions
+        # System prompt: accumulated summaries + node instructions + examples
         system_parts: list[str] = []
         if self._summaries:
             summaries_text = "\n\n".join(
@@ -226,16 +274,37 @@ class WorkflowEngine:
                 RESPONDER_CONTEXT_PREFIX.format(summaries_text=summaries_text)
             )
         system_parts.append(conv_data.instructions)
+
+        # Embed few-shot examples in the system prompt so the LLM treats them
+        # as style guidance rather than actual conversation history.
+        if conv_data.examples:
+            example_lines = ["\nExample exchanges (for tone and style):"]
+            for ex in conv_data.examples:
+                role_label = "Caller" if ex["role"] == "user" else "You"
+                example_lines.append(f"  {role_label}: {ex['content']}")
+            system_parts.append("\n".join(example_lines))
+
+        # Scope enforcement: if the node has outgoing edges, tell the LLM
+        # to stay within its defined boundaries.
+        outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+        if outgoing:
+            scope_lines = [
+                "\nIMPORTANT — Scope boundaries:",
+                "You are ONLY responsible for the topic described above.",
+                "If the caller asks about something outside your scope, do NOT attempt to answer it.",
+                "Instead, briefly acknowledge their request and say you'll get them to the right place.",
+                "Topics outside your scope include:",
+            ]
+            for edge in outgoing:
+                scope_lines.append(f"  - {edge.label}")
+            system_parts.append("\n".join(scope_lines))
+
         system_parts.append(
             "\nKeep responses concise — 1-2 sentences at a time."
         )
         messages.append({"role": "system", "content": "\n".join(system_parts)})
 
-        # Few-shot examples
-        for ex in conv_data.examples:
-            messages.append({"role": ex["role"], "content": ex["content"]})
-
-        # Current node's chat history
+        # Current node's chat history (fresh per node — no examples mixed in)
         messages.extend(self._get_history())
 
         return messages
@@ -245,31 +314,143 @@ class WorkflowEngine:
     # ------------------------------------------------------------------
 
     async def _transition(self, edge: WorkflowEdge) -> tuple[str, bool]:
-        """Transition to a new node via the given edge."""
+        """Transition to a new node via the given edge.
+
+        If the current node is a conversation node, generates a summary first.
+        If the target node is a decision node, chains through decisions until
+        a conversation node is reached.
+        """
         old_node = self._current_node
         new_node = self._workflow.get_node(edge.target)
 
-        # Generate summary of outgoing node
-        summary = await self._generate_summary()
-        self._summaries.append(summary)
-        logger.info(
-            "Transition: '%s' → '%s' via edge '%s'. Summary: %s",
-            old_node.id,
-            new_node.id,
-            edge.id,
-            summary.summary,
-        )
+        # Generate summary of outgoing node (only for conversation nodes)
+        if old_node.type == NodeType.conversation:
+            summary = await self._generate_summary()
+            self._summaries.append(summary)
+            logger.info(
+                "Transition: '%s' → '%s' via edge '%s'. Summary: %s",
+                old_node.id,
+                new_node.id,
+                edge.id,
+                summary.summary,
+            )
+        else:
+            logger.info(
+                "Transition: '%s' → '%s' via edge '%s' (decision node, no summary)",
+                old_node.id,
+                new_node.id,
+                edge.id,
+            )
 
         # Enter new node
         self._current_node = new_node
         self._iteration_count = 0
         self._enter_node(new_node)
 
-        # Generate first response in new node
+        # If new node is a decision node, route through it silently
+        if new_node.type == NodeType.decision:
+            return await self._route_through_decisions(), False
+
+        # Generate first response in new conversation node
         response = await self._call_responder()
         self._append_history("assistant", response)
 
         return response, False
+
+    async def _route_through_decisions(self) -> str:
+        """Route through consecutive decision nodes until reaching a conversation node.
+
+        Decision nodes produce no spoken output — they silently pick an edge
+        and move to the next node. This method handles chaining through multiple
+        decision nodes.
+        """
+        max_depth = 10  # safety guard against infinite loops
+        for _ in range(max_depth):
+            if self._current_node.type != NodeType.decision:
+                # Reached a conversation node — generate a response
+                response = await self._call_responder()
+                self._append_history("assistant", response)
+                return response
+
+            outgoing = self._workflow.get_outgoing_edges(self._current_node.id)
+            if not outgoing:
+                raise WorkflowError(
+                    f"Decision node '{self._current_node.id}' has no outgoing edges"
+                )
+
+            # Single outgoing edge — follow it immediately (no LLM call)
+            if len(outgoing) == 1:
+                edge = outgoing[0]
+                logger.info(
+                    "Decision node '%s': single edge, following '%s'",
+                    self._current_node.id,
+                    edge.id,
+                )
+            else:
+                # Call Router LLM to pick the edge
+                edge_id = await self._call_decision_router(outgoing)
+                edge = self._find_edge(edge_id, outgoing)
+                if edge is None:
+                    # Fallback to first edge
+                    logger.warning(
+                        "Decision router returned unknown '%s' — falling back to first edge",
+                        edge_id,
+                    )
+                    edge = outgoing[0]
+
+            # Move to next node
+            new_node = self._workflow.get_node(edge.target)
+            logger.info(
+                "Decision '%s' → '%s' via edge '%s'",
+                self._current_node.id,
+                new_node.id,
+                edge.id,
+            )
+            self._current_node = new_node
+            self._iteration_count = 0
+            self._enter_node(new_node)
+
+        raise WorkflowError("Too many consecutive decision nodes (possible loop)")
+
+    async def _call_decision_router(self, outgoing_edges: list[WorkflowEdge]) -> str:
+        """Ask the Router LLM which edge to follow from a decision node."""
+        decision_data = self._current_node.get_decision_data()
+        edges_text = "\n".join(
+            f'- Edge "{e.id}": {e.label}' for e in outgoing_edges
+        )
+
+        # Build context from accumulated summaries
+        if self._summaries:
+            context = "\n\n".join(
+                f"[{s.node_name}] {s.summary}"
+                + (f" | Key info: {json.dumps(s.key_info)}" if s.key_info else "")
+                for s in self._summaries
+            )
+        else:
+            context = "(No prior context)"
+
+        # Find the last caller utterance across all node histories
+        last_utterance = "(none)"
+        for node_id in reversed(list(self._node_histories.keys())):
+            for msg in reversed(self._node_histories[node_id]):
+                if msg["role"] == "user":
+                    last_utterance = msg["content"]
+                    break
+            if last_utterance != "(none)":
+                break
+
+        system = DECISION_ROUTER_PROMPT.format(
+            instruction=decision_data.instruction,
+            context=context,
+            edges_text=edges_text,
+            last_utterance=last_utterance,
+        )
+
+        messages = [{"role": "system", "content": system}]
+        result = await self._router.chat(messages)
+        decision = result.strip().strip('"').strip("'")
+        logger.info("Decision router at '%s': %s", self._current_node.id, decision)
+        return decision
 
     async def _generate_summary(self) -> NodeSummary:
         """Generate a summary of the current node's conversation via LLM."""
