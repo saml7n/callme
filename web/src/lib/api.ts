@@ -1,6 +1,12 @@
 /** API client for the CallMe backend. */
 
-import type { WorkflowDetail, WorkflowGraph, WorkflowListItem } from './types'
+import type {
+  CallDetail,
+  CallListItem,
+  WorkflowDetail,
+  WorkflowGraph,
+  WorkflowListItem,
+} from './types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
@@ -51,5 +57,12 @@ export const api = {
 
     delete: (id: string) =>
       request<void>(`/api/workflows/${id}`, { method: 'DELETE' }),
+  },
+
+  calls: {
+    list: (limit = 50, offset = 0) =>
+      request<CallListItem[]>(`/api/calls?limit=${limit}&offset=${offset}`),
+
+    get: (id: string) => request<CallDetail>(`/api/calls/${id}`),
   },
 }

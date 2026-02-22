@@ -671,8 +671,8 @@ As an **admin**, I want **a list of past calls with drill-down into full transcr
 2. Real-time transcript (WebSocket updates during live call) or post-call only for PoC?
 
 **Recorded answers:**
-- Phone masking: _unanswered_
-- Real-time transcript: _unanswered_
+- Phone masking: Always mask in the list view (`+44 *** *** 1234`). Full number visible on the detail page.
+- Real-time transcript: Post-call only for Story 12. Live WebSocket transcript is covered in Story 18.
 
 ---
 

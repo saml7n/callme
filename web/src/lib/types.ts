@@ -47,3 +47,43 @@ export interface WorkflowListItem {
   phone_number: string | null
   updated_at: string
 }
+
+// ---------------------------------------------------------------------------
+// Call types
+// ---------------------------------------------------------------------------
+
+export type CallStatus = 'completed' | 'transferred' | 'error' | 'in_progress'
+
+export interface CallListItem {
+  id: string
+  call_sid: string
+  from_number: string
+  to_number: string
+  workflow_id: string | null
+  workflow_name: string | null
+  started_at: string
+  ended_at: string | null
+  duration_seconds: number | null
+  status: CallStatus
+}
+
+export interface CallEventItem {
+  id: string
+  timestamp: string
+  event_type: 'transcript' | 'llm_response' | 'node_transition' | 'summary_generated' | 'action_executed' | 'error'
+  data_json: Record<string, unknown>
+}
+
+export interface CallDetail {
+  id: string
+  call_sid: string
+  from_number: string
+  to_number: string
+  workflow_id: string | null
+  workflow_name: string | null
+  started_at: string
+  ended_at: string | null
+  duration_seconds: number | null
+  status: CallStatus
+  events: CallEventItem[]
+}

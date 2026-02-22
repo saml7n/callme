@@ -51,12 +51,17 @@ export default function WorkflowList() {
           <span className="text-gray-600">›</span>
           <span className="text-gray-300">Workflows</span>
         </div>
-        <Button
-          className="bg-indigo-600 text-white hover:bg-indigo-500"
-          onClick={() => navigate('/workflows/new')}
-        >
-          + New Workflow
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link to="/calls">
+            <Button variant="outline" size="sm">Calls</Button>
+          </Link>
+          <Button
+            className="bg-indigo-600 text-white hover:bg-indigo-500"
+            onClick={() => navigate('/workflows/new')}
+          >
+            + New Workflow
+          </Button>
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto py-8 px-4">

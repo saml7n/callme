@@ -1,13 +1,14 @@
-"""Tests for call log API endpoints (Story 10)."""
+"""Tests for call log API endpoints (Story 10 + Story 12)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db.models import Call, CallEvent, EventType
+from app.db.models import Call, CallEvent, EventType, Workflow
 from app.main import app
 
 
@@ -97,3 +98,151 @@ class TestCallLogAPI:
             assert len(items) == 2
             assert items[0]["call_sid"] == "CA_new"
             assert items[1]["call_sid"] == "CA_old"
+
+    async def test_status_completed(self, db_session):
+        """A call with ended_at and no error/transfer events → completed."""
+        now = datetime.now(timezone.utc)
+        call = Call(
+            call_sid="CA_done",
+            from_number="+44",
+            to_number="+1",
+            ended_at=now,
+            duration_seconds=60,
+        )
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["status"] == "completed"
+
+    async def test_status_in_progress(self, db_session):
+        """A call with no ended_at → in_progress."""
+        call = Call(call_sid="CA_live", from_number="+44", to_number="+1")
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["status"] == "in_progress"
+
+    async def test_status_error(self, db_session):
+        """A call with an error event → error."""
+        now = datetime.now(timezone.utc)
+        call = Call(
+            call_sid="CA_err",
+            from_number="+44",
+            to_number="+1",
+            ended_at=now,
+        )
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        db_session.add(CallEvent(
+            call_id=call.id,
+            event_type=EventType.error,
+            data_json={"message": "Something went wrong"},
+        ))
+        db_session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["status"] == "error"
+
+    async def test_status_transferred(self, db_session):
+        """A call with a transfer action → transferred."""
+        now = datetime.now(timezone.utc)
+        call = Call(
+            call_sid="CA_xfer",
+            from_number="+44",
+            to_number="+1",
+            ended_at=now,
+        )
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        db_session.add(CallEvent(
+            call_id=call.id,
+            event_type=EventType.action_executed,
+            data_json={"action_type": "transfer", "destination": "+1999"},
+        ))
+        db_session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["status"] == "transferred"
+
+    async def test_workflow_name_present(self, db_session):
+        """Call linked to a workflow returns its name."""
+        wf = Workflow(
+            name="Reception",
+            graph_json={"nodes": [], "edges": [], "entry_node_id": "n1"},
+        )
+        db_session.add(wf)
+        db_session.commit()
+        db_session.refresh(wf)
+
+        call = Call(
+            call_sid="CA_wf",
+            from_number="+44",
+            to_number="+1",
+            workflow_id=wf.id,
+        )
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Detail
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["workflow_name"] == "Reception"
+            # List
+            resp = await c.get("/api/calls")
+            assert resp.json()[0]["workflow_name"] == "Reception"
+
+    async def test_workflow_name_null(self, db_session):
+        """Call without a workflow returns null workflow_name."""
+        call = Call(call_sid="CA_nowf", from_number="+44", to_number="+1")
+        db_session.add(call)
+        db_session.commit()
+        db_session.refresh(call)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(f"/api/calls/{call.id}")
+            assert resp.json()["workflow_name"] is None
+
+    async def test_offset_pagination(self, db_session):
+        """offset param skips calls."""
+        for i in range(3):
+            import time
+            time.sleep(0.01)
+            db_session.add(Call(
+                call_sid=f"CA_p{i}",
+                from_number="+44",
+                to_number="+1",
+            ))
+        db_session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # All
+            resp = await c.get("/api/calls?limit=10&offset=0")
+            assert len(resp.json()) == 3
+
+            # Skip first
+            resp = await c.get("/api/calls?limit=10&offset=1")
+            assert len(resp.json()) == 2
+
+            # Skip two
+            resp = await c.get("/api/calls?limit=10&offset=2")
+            assert len(resp.json()) == 1

@@ -6,6 +6,8 @@ import App from './App'
 import WorkflowPreview from './pages/WorkflowPreview'
 import WorkflowBuilder from './pages/WorkflowBuilder'
 import WorkflowList from './pages/WorkflowList'
+import CallList from './pages/CallList'
+import CallDetail from './pages/CallDetail'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -16,6 +18,8 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/workflows/new" element={<WorkflowBuilder />} />
         <Route path="/workflows/:id/edit" element={<WorkflowBuilder />} />
         <Route path="/workflows/preview" element={<WorkflowPreview />} />
+        <Route path="/calls" element={<CallList />} />
+        <Route path="/calls/:id" element={<CallDetail />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
