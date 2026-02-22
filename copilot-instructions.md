@@ -87,6 +87,13 @@ CallMe is an AI-powered phone receptionist. The architecture is documented in `d
 
 ### F) Close out
 - Update `docs/stories.md` with completion evidence, test results, and commit hash.
+- **Always print a "How to use the system" summary** after each completed story. This should include:
+  1. How to start the server and web app.
+  2. What env vars are required.
+  3. How to log in (if auth is enabled).
+  4. What features are now available and how to access them.
+  5. Any new URLs, credentials, or configuration the user needs to know about.
+  - This is mandatory — the user should never have to ask "how do I run this?".
 
 ## Coding style
 
