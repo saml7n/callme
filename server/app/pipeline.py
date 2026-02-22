@@ -42,7 +42,7 @@ FILLER_PHRASES = [
     "Let me look into that for you.",
 ]
 
-FILLER_THRESHOLD_MS = 800
+FILLER_THRESHOLD_MS = 1500
 
 # Error fallback messages
 ERROR_MSG_HEARING = "I'm sorry, I'm having trouble hearing you. Please hold."
@@ -178,6 +178,7 @@ class CallPipeline:
         # finish sending chunks over the WebSocket.
         self._playback_end: float = 0.0  # monotonic time when playback should end
         self._speaking_off_task: asyncio.Task[None] | None = None
+        self._filler_playing_until: float = 0.0  # monotonic time filler finishes
 
         # Workflow mode
         if engine is not None:
@@ -442,7 +443,7 @@ class CallPipeline:
                 if self._interrupted:
                     break
 
-                # Cancel filler on first token
+                # On first token: cancel the filler timer (or wait for filler to finish)
                 if not first_token_received:
                     first_token_received = True
                     if filler_task is not None:
@@ -452,10 +453,10 @@ class CallPipeline:
                         except asyncio.CancelledError:
                             pass
                         filler_task = None
-                    # If filler was playing, clear it
-                    if self._speaking:
-                        await self._interrupt()
-                        self._interrupted = False  # Reset — we want to speak the real response
+                    # Wait for any playing filler to finish naturally
+                    if self._filler_playing_until > 0:
+                        await self._wait_for_filler()
+                        self._speaking = False
 
                 buffer += chunk
                 full_response += chunk
@@ -553,7 +554,7 @@ class CallPipeline:
                 # Text chunk from streaming responder
                 chunk = item
 
-                # Cancel filler on first real content
+                # On first real content: cancel the filler timer (or wait for filler to finish)
                 if not first_chunk_received:
                     first_chunk_received = True
                     if filler_task is not None:
@@ -563,10 +564,10 @@ class CallPipeline:
                         except asyncio.CancelledError:
                             pass
                         filler_task = None
-                    # If filler was playing, clear it
-                    if self._speaking:
-                        await self._interrupt()
-                        self._interrupted = False  # Reset — we want to speak the real response
+                    # Wait for any playing filler to finish naturally
+                    if self._filler_playing_until > 0:
+                        await self._wait_for_filler()
+                        self._speaking = False
 
                 buffer += chunk
                 full_response += chunk
@@ -622,9 +623,25 @@ class CallPipeline:
                 self._speaking = True
                 msg = _build_outbound_media(self._stream_sid, clip)
                 await self._ws.send_text(msg)
-                # Don't set _speaking = False here — the real response will interrupt it
+                # Track when filler playback ends so we can wait for it
+                now = asyncio.get_event_loop().time()
+                filler_duration = len(clip) / 8000  # μ-law 8kHz
+                self._filler_playing_until = now + filler_duration + 0.3
         except asyncio.CancelledError:
             pass  # LLM responded in time
+
+    async def _wait_for_filler(self) -> None:
+        """Wait for any in-progress filler to finish playing on the phone.
+
+        Instead of sending a Twilio ``clear`` (which cuts the filler off
+        mid-word), we pause briefly so the caller hears the full phrase.
+        """
+        now = asyncio.get_event_loop().time()
+        remaining = self._filler_playing_until - now
+        if remaining > 0:
+            logger.debug("Waiting %.2fs for filler to finish playing", remaining)
+            await asyncio.sleep(remaining)
+        self._filler_playing_until = 0.0
 
     # ------------------------------------------------------------------
     # Audio output

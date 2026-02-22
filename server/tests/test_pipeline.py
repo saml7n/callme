@@ -1068,7 +1068,7 @@ class TestPipelineClose:
 
 class TestFillerTiming:
     async def test_filler_cancelled_when_llm_responds_quickly(self):
-        """If LLM starts producing tokens quickly (< 800ms), filler is cancelled."""
+        """If LLM starts producing tokens quickly (< 1500ms), filler is cancelled."""
         from app.pipeline import _filler_cache
 
         ws = make_ws_mock()
@@ -1105,7 +1105,7 @@ class TestFillerTiming:
         _filler_cache._clips = []
 
     async def test_filler_played_when_llm_is_slow(self):
-        """If LLM takes > 800ms, filler audio is sent to the WebSocket."""
+        """If LLM takes > 1500ms, filler audio is sent to the WebSocket."""
         from app.pipeline import _filler_cache
 
         ws = make_ws_mock()
@@ -1124,7 +1124,7 @@ class TestFillerTiming:
 
         class SlowLLM:
             async def chat_stream(self, messages, tools=None):
-                await asyncio.sleep(1.0)  # Over the 800ms threshold
+                await asyncio.sleep(2.0)  # Over the 1500ms threshold
                 yield "Here you go."
 
         llm = SlowLLM()
