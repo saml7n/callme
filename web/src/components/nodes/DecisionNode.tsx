@@ -1,13 +1,13 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 
-interface DecisionNodeData {
+export interface DecisionNodeData {
   label: string
   instruction: string
   isEntry?: boolean
   [key: string]: unknown
 }
 
-export default function DecisionNode({ data }: NodeProps) {
+export default function DecisionNode({ data, selected }: NodeProps) {
   const d = data as unknown as DecisionNodeData
   const isEntry = d.isEntry ?? false
   const instruction = d.instruction ?? ''
@@ -18,11 +18,12 @@ export default function DecisionNode({ data }: NodeProps) {
   return (
     <div
       className={`
-        rounded-xl shadow-lg w-64 overflow-hidden
-        ${isEntry
-          ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
-          : 'ring-1 ring-gray-700'}
-        bg-gray-900
+        rounded-xl shadow-lg w-64 overflow-hidden bg-gray-900
+        ${selected
+          ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-gray-950'
+          : isEntry
+            ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
+            : 'ring-1 ring-gray-700'}
       `}
     >
       {/* Header */}
@@ -36,7 +37,7 @@ export default function DecisionNode({ data }: NodeProps) {
         <div className="flex items-center gap-2">
           {isEntry && (
             <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">
-              Entry
+              Start
             </span>
           )}
           <span className="text-[10px] bg-yellow-800 text-yellow-300 px-1.5 py-0.5 rounded">
@@ -47,7 +48,9 @@ export default function DecisionNode({ data }: NodeProps) {
 
       {/* Body */}
       <div className="px-4 py-3">
-        <p className="text-xs text-gray-300 leading-relaxed">{preview}</p>
+        <p className="text-xs text-gray-300 leading-relaxed">
+          {preview || <span className="italic text-gray-500">No instruction set</span>}
+        </p>
         <p className="text-[11px] text-gray-500 mt-2 italic">No caller interaction</p>
       </div>
 

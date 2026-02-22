@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 
-interface ConversationNodeData {
+export interface ConversationNodeData {
   label: string
   instructions: string
   examples?: Array<{ role: string; content: string }>
@@ -9,25 +9,25 @@ interface ConversationNodeData {
   [key: string]: unknown
 }
 
-export default function ConversationNode({ data }: NodeProps) {
+export default function ConversationNode({ data, selected }: NodeProps) {
   const d = data as unknown as ConversationNodeData
   const isEntry = d.isEntry ?? false
   const maxIter = d.max_iterations ?? 10
   const instructions = d.instructions ?? ''
   const examples = d.examples ?? []
 
-  // Truncate instructions for preview
   const preview =
     instructions.length > 120 ? instructions.slice(0, 120) + '…' : instructions
 
   return (
     <div
       className={`
-        rounded-xl shadow-lg w-72 overflow-hidden
-        ${isEntry
-          ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
-          : 'ring-1 ring-gray-700'}
-        bg-gray-900
+        rounded-xl shadow-lg w-72 overflow-hidden bg-gray-900
+        ${selected
+          ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-gray-950'
+          : isEntry
+            ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
+            : 'ring-1 ring-gray-700'}
       `}
     >
       {/* Header */}
@@ -41,7 +41,7 @@ export default function ConversationNode({ data }: NodeProps) {
         <div className="flex items-center gap-2">
           {isEntry && (
             <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">
-              Entry
+              Start
             </span>
           )}
           <span className="text-[10px] bg-blue-800 text-blue-300 px-1.5 py-0.5 rounded">
@@ -52,7 +52,9 @@ export default function ConversationNode({ data }: NodeProps) {
 
       {/* Body */}
       <div className="px-4 py-3 space-y-2">
-        <p className="text-xs text-gray-300 leading-relaxed">{preview}</p>
+        <p className="text-xs text-gray-300 leading-relaxed">
+          {preview || <span className="italic text-gray-500">No instructions set</span>}
+        </p>
 
         {/* Stats */}
         <div className="flex items-center gap-3 text-[11px] text-gray-500 pt-1 border-t border-gray-800">

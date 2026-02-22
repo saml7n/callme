@@ -4,12 +4,17 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import App from './App'
 import WorkflowPreview from './pages/WorkflowPreview'
+import WorkflowBuilder from './pages/WorkflowBuilder'
+import WorkflowList from './pages/WorkflowList'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
+        <Route path="/workflows" element={<WorkflowList />} />
+        <Route path="/workflows/new" element={<WorkflowBuilder />} />
+        <Route path="/workflows/:id/edit" element={<WorkflowBuilder />} />
         <Route path="/workflows/preview" element={<WorkflowPreview />} />
       </Routes>
     </BrowserRouter>

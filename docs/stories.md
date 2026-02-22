@@ -584,22 +584,22 @@ As a **dashboard developer**, I want **CRUD endpoints for workflows and read end
 As an **admin**, I want **a drag-and-drop visual editor for designing call workflows**, so that **I can create and modify call flows without writing JSON by hand**.
 
 ### Acceptance criteria
-- [ ] A page at `/workflows/new` (and `/workflows/{id}/edit`) renders a React Flow canvas.
-- [ ] Left sidebar palette with three node types that can be dragged onto the canvas:
+- [x] A page at `/workflows/new` (and `/workflows/{id}/edit`) renders a React Flow canvas.
+- [x] Left sidebar palette with three node types that can be dragged onto the canvas:
   - **Conversation** (blue) — shows a preview of the `instructions` text.
   - **Decision** (yellow/diamond) — shows the `instruction` text.
   - **Action** (red) — shows the `action_type` badge.
-- [ ] Edges drawn between node handles. Each edge has an editable `label` (plain English condition).
-- [ ] Clicking a node opens a right sidebar config panel:
+- [x] Edges drawn between node handles. Each edge has an editable `label` (plain English condition).
+- [x] Clicking a node opens a right sidebar config panel:
   - **Conversation:** `instructions` (textarea), `examples` (add/remove pairs), `max_iterations` (number).
   - **Decision:** `instruction` (textarea). Outgoing edge labels are edited on the edges themselves.
   - **Action:** `action_type` (dropdown: `end_call`, `transfer`), then type-specific fields (`message` for end_call; `target_number` + `announcement` for transfer).
-- [ ] One node is marked as the entry node (visual indicator — e.g. green border or "START" badge). Clicking "Set as entry" on a node marks it.
-- [ ] "Save" → `PUT /api/workflows/{id}` with serialised graph. "Publish" → `POST /api/workflows/{id}/publish`.
-- [ ] Loading `/workflows/{id}/edit` fetches the workflow and renders saved nodes, edges, and positions.
-- [ ] Delete a node → node and connected edges removed.
-- [ ] Validation warnings: no entry node set, orphan nodes (no edges in or out), duplicate IDs.
-- [ ] Minimap, zoom controls, background grid.
+- [x] One node is marked as the entry node (visual indicator — e.g. green border or "START" badge). Clicking "Set as entry" on a node marks it.
+- [x] "Save" → `PUT /api/workflows/{id}` with serialised graph. "Publish" → `POST /api/workflows/{id}/publish`.
+- [x] Loading `/workflows/{id}/edit` fetches the workflow and renders saved nodes, edges, and positions.
+- [x] Delete a node → node and connected edges removed.
+- [x] Validation warnings: no entry node set, orphan nodes (no edges in or out), duplicate IDs.
+- [x] Minimap, zoom controls, background grid.
 
 ### Unit tests (Vitest + React Testing Library)
 - Canvas renders without crashing.
@@ -625,8 +625,8 @@ As an **admin**, I want **a drag-and-drop visual editor for designing call workf
 2. Should the builder support undo/redo for PoC?
 
 **Recorded answers:**
-- UI library: _unanswered_
-- Undo/redo: _unanswered_
+- UI library: shadcn/ui (Radix primitives + Tailwind).
+- Undo/redo: Defer to a later story — skip for PoC.
 
 ---
 

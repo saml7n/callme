@@ -16,7 +16,7 @@ import ConversationNode from '../components/nodes/ConversationNode'
 import DecisionNode from '../components/nodes/DecisionNode'
 import ActionNode from '../components/nodes/ActionNode'
 
-const API_BASE = 'http://localhost:3000'
+const API_BASE = ''
 
 const nodeTypes = {
   conversation: ConversationNode,

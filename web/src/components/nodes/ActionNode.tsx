@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 
-interface ActionNodeData {
+export interface ActionNodeData {
   label: string
   action_type: string
   message?: string
@@ -20,14 +20,13 @@ const ACTION_ICONS: Record<string, string> = {
   transfer: '↗️',
 }
 
-export default function ActionNode({ data }: NodeProps) {
+export default function ActionNode({ data, selected }: NodeProps) {
   const d = data as unknown as ActionNodeData
   const isEntry = d.isEntry ?? false
-  const actionType = d.action_type ?? 'unknown'
+  const actionType = d.action_type ?? 'end_call'
   const actionLabel = ACTION_LABELS[actionType] ?? actionType
   const icon = ACTION_ICONS[actionType] ?? '⚡'
 
-  // Pick the relevant text to preview
   const previewText =
     actionType === 'transfer'
       ? d.announcement ?? ''
@@ -39,11 +38,12 @@ export default function ActionNode({ data }: NodeProps) {
   return (
     <div
       className={`
-        rounded-xl shadow-lg w-64 overflow-hidden
-        ${isEntry
-          ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
-          : 'ring-1 ring-gray-700'}
-        bg-gray-900
+        rounded-xl shadow-lg w-64 overflow-hidden bg-gray-900
+        ${selected
+          ? 'ring-2 ring-red-400 ring-offset-2 ring-offset-gray-950'
+          : isEntry
+            ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
+            : 'ring-1 ring-gray-700'}
       `}
     >
       {/* Header */}
@@ -57,7 +57,7 @@ export default function ActionNode({ data }: NodeProps) {
         <div className="flex items-center gap-2">
           {isEntry && (
             <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">
-              Entry
+              Start
             </span>
           )}
           <span className="text-[10px] bg-red-800 text-red-300 px-1.5 py-0.5 rounded">
@@ -68,9 +68,10 @@ export default function ActionNode({ data }: NodeProps) {
 
       {/* Body */}
       <div className="px-4 py-3 space-y-2">
-        <p className="text-xs text-gray-300 leading-relaxed">{preview}</p>
+        <p className="text-xs text-gray-300 leading-relaxed">
+          {preview || <span className="italic text-gray-500">No message set</span>}
+        </p>
 
-        {/* Transfer target */}
         {actionType === 'transfer' && d.target_number && (
           <div className="flex items-center gap-1 text-[11px] text-gray-500 pt-1 border-t border-gray-800">
             <span>📱</span>
