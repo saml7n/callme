@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db.models import Workflow
+from app.db.models import PhoneNumber, Workflow
 from app.main import app
 
 
@@ -171,6 +171,13 @@ class TestWorkflowPublish:
     async def test_publish_sets_active_and_phone(self, db_session):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Register phone number first
+            resp = await c.post(
+                "/api/phone-numbers",
+                json={"number": "+441234", "label": "Test"},
+            )
+            phone_id = resp.json()["id"]
+
             resp = await c.post(
                 "/api/workflows",
                 json={"name": "Flow A", "graph_json": _minimal_graph()},
@@ -179,7 +186,7 @@ class TestWorkflowPublish:
 
             resp = await c.post(
                 f"/api/workflows/{wf_id}/publish",
-                json={"phone_number": "+441234"},
+                json={"phone_number_id": phone_id},
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -190,13 +197,20 @@ class TestWorkflowPublish:
         """Publishing workflow B on the same number deactivates workflow A."""
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Register phone number
+            resp = await c.post(
+                "/api/phone-numbers",
+                json={"number": "+441234", "label": "Test"},
+            )
+            phone_id = resp.json()["id"]
+
             # Create and publish A
             resp = await c.post(
                 "/api/workflows",
                 json={"name": "Flow A", "graph_json": _minimal_graph()},
             )
             id_a = resp.json()["id"]
-            await c.post(f"/api/workflows/{id_a}/publish", json={"phone_number": "+441234"})
+            await c.post(f"/api/workflows/{id_a}/publish", json={"phone_number_id": phone_id})
 
             # Create and publish B on the same number
             resp = await c.post(
@@ -204,7 +218,7 @@ class TestWorkflowPublish:
                 json={"name": "Flow B", "graph_json": _minimal_graph()},
             )
             id_b = resp.json()["id"]
-            await c.post(f"/api/workflows/{id_b}/publish", json={"phone_number": "+441234"})
+            await c.post(f"/api/workflows/{id_b}/publish", json={"phone_number_id": phone_id})
 
             # A should be deactivated
             resp = await c.get(f"/api/workflows/{id_a}")
@@ -221,13 +235,20 @@ class TestWorkflowPublish:
             resp = await c.get("/api/workflows/active")
             assert resp.status_code == 404
 
+            # Register phone number
+            resp = await c.post(
+                "/api/phone-numbers",
+                json={"number": "+441234", "label": "Test"},
+            )
+            phone_id = resp.json()["id"]
+
             # Create and publish
             resp = await c.post(
                 "/api/workflows",
                 json={"name": "Active", "graph_json": _minimal_graph()},
             )
             wf_id = resp.json()["id"]
-            await c.post(f"/api/workflows/{wf_id}/publish", json={"phone_number": "+441234"})
+            await c.post(f"/api/workflows/{wf_id}/publish", json={"phone_number_id": phone_id})
 
             # Now active
             resp = await c.get("/api/workflows/active")
@@ -237,20 +258,33 @@ class TestWorkflowPublish:
     async def test_get_active_filtered_by_phone(self, db_session):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Register two phone numbers
+            resp = await c.post(
+                "/api/phone-numbers",
+                json={"number": "+44", "label": "UK"},
+            )
+            phone_uk = resp.json()["id"]
+
+            resp = await c.post(
+                "/api/phone-numbers",
+                json={"number": "+1", "label": "US"},
+            )
+            phone_us = resp.json()["id"]
+
             # Create two workflows on different numbers
             resp = await c.post(
                 "/api/workflows",
                 json={"name": "UK", "graph_json": _minimal_graph()},
             )
             id_uk = resp.json()["id"]
-            await c.post(f"/api/workflows/{id_uk}/publish", json={"phone_number": "+44"})
+            await c.post(f"/api/workflows/{id_uk}/publish", json={"phone_number_id": phone_uk})
 
             resp = await c.post(
                 "/api/workflows",
                 json={"name": "US", "graph_json": _minimal_graph()},
             )
             id_us = resp.json()["id"]
-            await c.post(f"/api/workflows/{id_us}/publish", json={"phone_number": "+1"})
+            await c.post(f"/api/workflows/{id_us}/publish", json={"phone_number_id": phone_us})
 
             # Filter by phone
             resp = await c.get("/api/workflows/active", params={"phone_number": "+44"})

@@ -3,6 +3,7 @@
 import type {
   CallDetail,
   CallListItem,
+  PhoneNumberItem,
   WorkflowDetail,
   WorkflowGraph,
   WorkflowListItem,
@@ -77,10 +78,13 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    publish: (id: string, phoneNumber: string) =>
+    publish: (id: string, phoneNumberId: string, version?: number) =>
       request<WorkflowDetail>(`/api/workflows/${id}/publish`, {
         method: 'POST',
-        body: JSON.stringify({ phone_number: phoneNumber }),
+        body: JSON.stringify({
+          phone_number_id: phoneNumberId,
+          ...(version !== undefined ? { version } : {}),
+        }),
       }),
 
     delete: (id: string) =>
@@ -92,5 +96,18 @@ export const api = {
       request<CallListItem[]>(`/api/calls?limit=${limit}&offset=${offset}`),
 
     get: (id: string) => request<CallDetail>(`/api/calls/${id}`),
+  },
+
+  phoneNumbers: {
+    list: () => request<PhoneNumberItem[]>('/api/phone-numbers'),
+
+    create: (number: string, label: string) =>
+      request<PhoneNumberItem>('/api/phone-numbers', {
+        method: 'POST',
+        body: JSON.stringify({ number, label }),
+      }),
+
+    delete: (id: string) =>
+      request<void>(`/api/phone-numbers/${id}`, { method: 'DELETE' }),
   },
 }

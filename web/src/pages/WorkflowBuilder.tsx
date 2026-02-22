@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
-import type { WorkflowGraph, WorkflowDetail } from '@/lib/types'
+import type { WorkflowGraph, WorkflowDetail, PhoneNumberItem } from '@/lib/types'
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -209,7 +209,9 @@ export default function WorkflowBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [publishOpen, setPublishOpen] = useState(false)
-  const [publishPhone, setPublishPhone] = useState('')
+  const [publishPhoneId, setPublishPhoneId] = useState('')
+  const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberItem[]>([])
+  const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(null)
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
 
@@ -385,10 +387,34 @@ export default function WorkflowBuilder() {
   }, [nodes, edges, entryNodeId, savedId, workflowName, version, navigate])
 
   /* ---- Publish ---- */
+  const handlePublishOpen = useCallback(async () => {
+    try {
+      const nums = await api.phoneNumbers.list()
+      setPhoneNumbers(nums)
+    } catch {
+      // If we can't load numbers, still open the dialog (will show empty state)
+      setPhoneNumbers([])
+    }
+    setPublishOpen(true)
+  }, [])
+
   const handlePublish = useCallback(async () => {
-    if (!savedId) return
+    if (!savedId || !publishPhoneId) return
+
+    // Check if selected number is assigned to a different workflow
+    const selected = phoneNumbers.find((p) => p.id === publishPhoneId)
+    if (
+      selected?.workflow_id &&
+      selected.workflow_id !== savedId &&
+      !confirmDeactivate
+    ) {
+      setConfirmDeactivate(selected.workflow_name ?? 'another workflow')
+      return
+    }
+
     setSaving(true)
     setError(null)
+    setConfirmDeactivate(null)
     try {
       // Save first
       const graph = flowToWorkflowGraph(
@@ -400,7 +426,7 @@ export default function WorkflowBuilder() {
         version,
       )
       await api.workflows.update(savedId, { name: workflowName, graph_json: graph })
-      await api.workflows.publish(savedId, publishPhone)
+      await api.workflows.publish(savedId, publishPhoneId, version)
       setSuccessMsg('Published!')
       setPublishOpen(false)
     } catch (err) {
@@ -409,7 +435,7 @@ export default function WorkflowBuilder() {
       setSaving(false)
       setTimeout(() => setSuccessMsg(null), 2000)
     }
-  }, [savedId, nodes, edges, entryNodeId, workflowName, version, publishPhone])
+  }, [savedId, nodes, edges, entryNodeId, workflowName, version, publishPhoneId, phoneNumbers, confirmDeactivate])
 
   /* ---- Render ---- */
 
@@ -468,7 +494,7 @@ export default function WorkflowBuilder() {
           <Button
             size="sm"
             className="bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:text-indigo-300/50"
-            onClick={() => setPublishOpen(true)}
+            onClick={handlePublishOpen}
             disabled={!savedId || saving}
           >
             Publish
@@ -552,33 +578,63 @@ export default function WorkflowBuilder() {
       </div>
 
       {/* Publish dialog */}
-      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+      <Dialog open={publishOpen} onOpenChange={(open) => { setPublishOpen(open); setConfirmDeactivate(null) }}>
         <DialogContent className="bg-gray-900 border-gray-700">
           <DialogHeader>
             <DialogTitle className="text-white">Publish Workflow</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <Label className="text-gray-400">Phone number to assign</Label>
-            <Input
-              value={publishPhone}
-              onChange={(e) => setPublishPhone(e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white"
-              placeholder="+44..."
-            />
-            <p className="text-xs text-gray-500">
-              This will deactivate any other workflow on the same number.
-            </p>
+            <Label className="text-gray-400">Select a phone number</Label>
+            {phoneNumbers.length === 0 ? (
+              <div className="text-sm text-gray-500">
+                No phone numbers registered.{' '}
+                <Link to="/settings/phone-numbers" className="text-indigo-400 hover:text-indigo-300">
+                  Add one in Settings
+                </Link>
+              </div>
+            ) : (
+              <select
+                value={publishPhoneId}
+                onChange={(e) => { setPublishPhoneId(e.target.value); setConfirmDeactivate(null) }}
+                className="w-full rounded-md bg-gray-800 border border-gray-700 text-white px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="">Choose a number…</option>
+                {phoneNumbers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.number}{p.label ? ` — ${p.label}` : ''}
+                    {p.workflow_id && p.workflow_id !== savedId ? ` (in use: ${p.workflow_name ?? 'Unknown'})` : ''}
+                    {p.workflow_id && p.workflow_id === savedId ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            {confirmDeactivate && (
+              <p className="text-yellow-400 text-sm">
+                This will deactivate <strong>{confirmDeactivate}</strong>. Click Publish again to confirm.
+              </p>
+            )}
+            {!confirmDeactivate && (
+              <p className="text-xs text-gray-500">
+                The selected number will be assigned to this workflow.
+              </p>
+            )}
+            <Link
+              to="/settings/phone-numbers"
+              className="text-xs text-indigo-400 hover:text-indigo-300 inline-block"
+            >
+              Manage phone numbers →
+            </Link>
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setPublishOpen(false)}>
+            <Button variant="secondary" onClick={() => { setPublishOpen(false); setConfirmDeactivate(null) }}>
               Cancel
             </Button>
             <Button
               className="bg-indigo-600 text-white hover:bg-indigo-500"
               onClick={handlePublish}
-              disabled={saving || !publishPhone}
+              disabled={saving || !publishPhoneId}
             >
-              {saving ? 'Publishing…' : 'Publish'}
+              {saving ? 'Publishing…' : confirmDeactivate ? 'Confirm & Publish' : 'Publish'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -49,6 +49,19 @@ export interface WorkflowListItem {
 }
 
 // ---------------------------------------------------------------------------
+// Phone number types
+// ---------------------------------------------------------------------------
+
+export interface PhoneNumberItem {
+  id: string
+  number: string
+  label: string
+  workflow_id: string | null
+  workflow_name: string | null
+  updated_at: string
+}
+
+// ---------------------------------------------------------------------------
 // Call types
 // ---------------------------------------------------------------------------
 

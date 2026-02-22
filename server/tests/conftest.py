@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.db.session as session_mod
 import app.db.call_logger as call_logger_mod
 from app.auth import require_auth
-from app.db.models import Call, CallEvent, EventType, Workflow
+from app.db.models import Call, CallEvent, EventType, PhoneNumber, Workflow
 from app.db.session import get_session as _original_get_session
 from app.main import app
 

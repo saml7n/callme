@@ -2,6 +2,7 @@
 
 Tables:
 - Workflow — workflow definitions with graph JSON.
+- PhoneNumber — registered phone numbers with workflow assignment.
 - Call — call records with metadata.
 - CallEvent — timestamped events within a call.
 """
@@ -34,6 +35,22 @@ class Workflow(SQLModel, table=True):
     is_active: bool = Field(default=False, index=True)
     phone_number: Optional[str] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# PhoneNumber
+# ---------------------------------------------------------------------------
+
+class PhoneNumber(SQLModel, table=True):
+    """A registered phone number that can be assigned to a workflow."""
+
+    __tablename__ = "phone_numbers"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    number: str = Field(index=True, unique=True)  # E.164 format
+    label: str = Field(default="")
+    workflow_id: Optional[UUID] = Field(default=None, foreign_key="workflows.id")
     updated_at: datetime = Field(default_factory=_utcnow)
 
 

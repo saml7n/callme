@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.auth import require_auth
-from app.db.models import Workflow
+from app.db.models import PhoneNumber, Workflow
 from app.db.session import get_session
 from app.workflow.schema import Workflow as WorkflowSchema
 
@@ -46,7 +46,8 @@ class WorkflowUpdate(BaseModel):
 class WorkflowPublish(BaseModel):
     """Body for POST /api/workflows/{id}/publish."""
 
-    phone_number: str = Field(min_length=1, max_length=30)
+    phone_number_id: UUID
+    version: int | None = None  # optimistic concurrency — reject if stale
 
 
 class WorkflowListItem(BaseModel):
@@ -181,32 +182,62 @@ async def publish_workflow(
 ) -> Workflow:
     """Publish a workflow — sets is_active=True and assigns a phone number.
 
+    Accepts ``phone_number_id`` referencing the ``phone_numbers`` table.
+    Supports optimistic concurrency: if ``version`` is provided and doesn't
+    match the current DB version, returns 409.
     Deactivates any other workflow currently active on the same phone number.
     """
     workflow = session.get(Workflow, workflow_id)
     if workflow is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Deactivate other workflows on the same phone number
-    existing = session.exec(
+    # Optimistic concurrency check
+    if body.version is not None and body.version != workflow.version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Version conflict: expected {body.version}, current is {workflow.version}",
+        )
+
+    # Resolve phone number
+    phone = session.get(PhoneNumber, body.phone_number_id)
+    if phone is None:
+        raise HTTPException(status_code=404, detail="Phone number not found")
+
+    # Check if the number is assigned to a different active workflow
+    if phone.workflow_id is not None and phone.workflow_id != workflow_id:
+        other_wf = session.get(Workflow, phone.workflow_id)
+        if other_wf is not None and other_wf.is_active:
+            # Deactivate the other workflow
+            other_wf.is_active = False
+            other_wf.phone_number = None
+            other_wf.updated_at = datetime.now(timezone.utc)
+            session.add(other_wf)
+
+    # Unassign this phone number from any previous workflow's phone_number field
+    prev_on_number = session.exec(
         select(Workflow).where(
-            Workflow.phone_number == body.phone_number,
-            Workflow.is_active == True,  # noqa: E712
+            Workflow.phone_number == phone.number,
             Workflow.id != workflow_id,
         )
     ).all()
-    for w in existing:
+    for w in prev_on_number:
         w.is_active = False
+        w.phone_number = None
         w.updated_at = datetime.now(timezone.utc)
         session.add(w)
 
+    # Assign phone number to this workflow
+    phone.workflow_id = workflow_id
+    phone.updated_at = datetime.now(timezone.utc)
+    session.add(phone)
+
     workflow.is_active = True
-    workflow.phone_number = body.phone_number
+    workflow.phone_number = phone.number
     workflow.updated_at = datetime.now(timezone.utc)
     session.add(workflow)
     session.commit()
     session.refresh(workflow)
-    logger.info("Published workflow %s to %s", workflow.id, body.phone_number)
+    logger.info("Published workflow %s to %s", workflow.id, phone.number)
     return workflow
 
 

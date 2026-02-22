@@ -740,29 +740,29 @@ As an **admin**, I want **a phone number registry so I can see which numbers are
 ### Acceptance criteria
 
 #### Server
-- [ ] `GET /api/phone-numbers` returns all configured phone numbers with their current workflow assignment (if any).
-- [ ] Phone numbers are stored in a `phone_numbers` table: `id`, `number` (E.164), `label` (friendly name), `workflow_id` (FK, nullable), `updated_at`.
-- [ ] `POST /api/phone-numbers` — register a new number (admin provides the Twilio number + label).
-- [ ] `DELETE /api/phone-numbers/{id}` — remove a number (only if not assigned to an active workflow).
-- [ ] `POST /api/workflows/{id}/publish` accepts a `phone_number_id` (not a raw string). The server:
+- [x] `GET /api/phone-numbers` returns all configured phone numbers with their current workflow assignment (if any).
+- [x] Phone numbers are stored in a `phone_numbers` table: `id`, `number` (E.164), `label` (friendly name), `workflow_id` (FK, nullable), `updated_at`.
+- [x] `POST /api/phone-numbers` — register a new number (admin provides the Twilio number + label).
+- [x] `DELETE /api/phone-numbers/{id}` — remove a number (only if not assigned to an active workflow).
+- [x] `POST /api/workflows/{id}/publish` accepts a `phone_number_id` (not a raw string). The server:
   1. Acquires a row-level lock on the phone number.
   2. Checks the number isn't already assigned to a *different* active workflow (race-condition safe).
   3. Deactivates any previous workflow on that number.
   4. Assigns the number and activates the workflow.
   5. Returns `409 Conflict` if the number was grabbed by another request between check and assign.
-- [ ] Optimistic concurrency: publish includes the workflow's current `version`; server rejects if stale (`409`).
+- [x] Optimistic concurrency: publish includes the workflow's current `version`; server rejects if stale (`409`).
 
 #### Web — Publish dialog
-- [ ] The publish dialog shows a dropdown of available phone numbers (fetched from `/api/phone-numbers`).
-- [ ] Each option shows: number + label + current assignment (e.g. "In use by: Dental Reception").
-- [ ] Numbers already assigned to *another* active workflow show a warning but can still be selected (with confirmation: "This will deactivate *Dental Reception*. Continue?").
-- [ ] Free-text phone input removed — only registered numbers can be selected.
+- [x] The publish dialog shows a dropdown of available phone numbers (fetched from `/api/phone-numbers`).
+- [x] Each option shows: number + label + current assignment (e.g. "In use by: Dental Reception").
+- [x] Numbers already assigned to *another* active workflow show a warning but can still be selected (with confirmation: "This will deactivate *Dental Reception*. Continue?").
+- [x] Free-text phone input removed — only registered numbers can be selected.
 
 #### Web — Phone number management page
-- [ ] A page at `/settings/phone-numbers` lists all registered numbers.
-- [ ] Each row shows: number, label, assigned workflow (link), status (available / in use).
-- [ ] "Add Number" form: E.164 number + label.
-- [ ] "Remove" button (disabled if assigned to an active workflow).
+- [x] A page at `/settings/phone-numbers` lists all registered numbers.
+- [x] Each row shows: number, label, assigned workflow (link), status (available / in use).
+- [x] "Add Number" form: E.164 number + label.
+- [x] "Remove" button (disabled if assigned to an active workflow).
 
 ### Unit tests
 - **Server:** Publish with valid phone_number_id → success. Publish with already-assigned number → deactivates previous. Two concurrent publishes to same number → one succeeds, one gets 409. Publish with stale version → 409.

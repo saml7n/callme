@@ -10,6 +10,7 @@ import WorkflowBuilder from './pages/WorkflowBuilder'
 import WorkflowList from './pages/WorkflowList'
 import CallList from './pages/CallList'
 import CallDetail from './pages/CallDetail'
+import PhoneNumbers from './pages/PhoneNumbers'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/workflows/preview" element={<AuthGuard><WorkflowPreview /></AuthGuard>} />
         <Route path="/calls" element={<AuthGuard><CallList /></AuthGuard>} />
         <Route path="/calls/:id" element={<AuthGuard><CallDetail /></AuthGuard>} />
+        <Route path="/settings/phone-numbers" element={<AuthGuard><PhoneNumbers /></AuthGuard>} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
