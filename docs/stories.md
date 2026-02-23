@@ -1047,17 +1047,17 @@ Additionally, the **config-warnings banner** was checking only the `CALLME_FALLB
 
 ### Acceptance criteria
 
-- [ ] **Shared `AppShell` layout component** wrapping all authenticated routes. Contains:
+- [x] **Shared `AppShell` layout component** wrapping all authenticated routes. Contains:
   - Left: "Pronto" logo/text → links to `/` (home dashboard).
   - Centre/right: Top-level nav links — **Workflows**, **Calls**, **Live Calls**, **Settings** (dropdown or group for Phone Numbers + Integrations).
   - Far right: "Setup" gear icon (→ `/setup`), Sign Out button.
-- [ ] **Breadcrumbs** on every sub-page (e.g. `Workflows › Edit: "My Flow"`, `Calls › Detail`).
-- [ ] **WorkflowBuilder** header includes a "← Workflows" back link.
-- [ ] **WorkflowPreview** header includes a "← Back" link (to previous page or `/workflows`).
-- [ ] **Setup** page gets an `✕ Close` / Home icon in the top-right (navigates to `/` or `/workflows`).
-- [ ] **Integrations** page uses the same `AppShell` header as every other page (remove the custom "← Home" pattern).
-- [ ] **Catch-all 404 route** that renders a "Page not found" message with a link home.
-- [ ] Every page is reachable within **≤ 2 clicks** from any other page (via the shared nav bar).
+- [x] **Breadcrumbs** on every sub-page (e.g. `Workflows › Edit: "My Flow"`, `Calls › Detail`).
+- [x] **WorkflowBuilder** header includes a "← Workflows" back link.
+- [x] **WorkflowPreview** header includes a "← Back" link (to previous page or `/workflows`).
+- [x] **Setup** page gets an `✕ Close` / Home icon in the top-right (navigates to `/` or `/workflows`).
+- [x] **Integrations** page uses the same `AppShell` header as every other page (remove the custom "← Home" pattern).
+- [x] **Catch-all 404 route** that renders a "Page not found" message with a link home.
+- [x] Every page is reachable within **≤ 2 clicks** from any other page (via the shared nav bar).
 
 ### Reachability matrix (target state)
 
@@ -1069,6 +1069,12 @@ Additionally, the **config-warnings banner** was checking only the `CALLME_FALLB
 
 - **Web:** `AppShell` renders nav links (Workflows, Calls, Live Calls, Settings). Clicking links navigates correctly. Breadcrumbs render on sub-pages. 404 page renders for unknown routes.
 - **Server:** Config-warnings returns no warnings when `admin_phone_number` is set in the DB (even without `CALLME_FALLBACK_NUMBER` env var).
+
+### Completion
+
+- **Commit:** `80cb641` feat(story-19): global AppShell nav bar, 404 page, consistent navigation
+- **Tests:** Web component tests for AppShell, 404 page, navigation links. All passing.
+- **QA:** Playwright — verified nav links on every page, breadcrumbs, 404 route, setup close button. All checks passed.
 
 ### Blocked until answered
 
@@ -1086,13 +1092,13 @@ The `AppShell` component wraps every authenticated page with a shared nav bar. T
 
 ### Acceptance criteria
 
-- [ ] **Banner appears when active call count ≥ 1.** A coloured banner (e.g. green/blue pill or bar) renders inside `AppShell`, above or beside the nav links, showing the live call count (e.g. "🔴 2 live calls").
-- [ ] **Banner disappears when count drops to 0.** No banner is rendered when there are no active calls.
-- [ ] **Real-time updates.** The banner count updates within ~2 seconds of a call starting or ending, without a full page refresh. Use the existing `/ws/calls/live` WebSocket or a lightweight polling endpoint.
-- [ ] **Clicking the banner navigates to `/calls/live`.** Acts as a shortcut to the Live Calls page.
-- [ ] **Works on every page.** Since the banner is in `AppShell`, it is visible on Home, Workflows, Calls, Phone Numbers, Integrations, Setup, etc.
-- [ ] **Singular/plural grammar.** Shows "1 live call" vs "2 live calls".
-- [ ] **Accessible.** Banner has an `aria-live="polite"` region so screen readers announce count changes.
+- [x] **Banner appears when active call count ≥ 1.** A coloured banner (e.g. green/blue pill or bar) renders inside `AppShell`, above or beside the nav links, showing the live call count (e.g. "🔴 2 live calls").
+- [x] **Banner disappears when count drops to 0.** No banner is rendered when there are no active calls.
+- [x] **Real-time updates.** The banner count updates within ~2 seconds of a call starting or ending, without a full page refresh. Use the existing `/ws/calls/live` WebSocket or a lightweight polling endpoint.
+- [x] **Clicking the banner navigates to `/calls/live`.** Acts as a shortcut to the Live Calls page.
+- [x] **Works on every page.** Since the banner is in `AppShell`, it is visible on Home, Workflows, Calls, Phone Numbers, Integrations, Setup, etc.
+- [x] **Singular/plural grammar.** Shows "1 live call" vs "2 live calls".
+- [x] **Accessible.** Banner has an `aria-live="polite"` region so screen readers announce count changes.
 
 ### Technical notes
 
@@ -1113,6 +1119,12 @@ The `AppShell` component wraps every authenticated page with a shared nav bar. T
 
 - **Web:** `LiveCallBanner` renders nothing when count is 0. Renders "1 live call" when count is 1. Renders "3 live calls" when count is 3. Click navigates to `/calls/live`. Banner has `aria-live="polite"`.
 - **Server (if new endpoint):** `/api/calls/live/count` returns correct count.
+
+### Completion
+
+- **Commit:** `02f5f3d` feat: Story 20 — live call count banner in AppShell
+- **Tests:** 6 web tests for LiveCallBanner (render/hide, singular/plural, click navigation, aria-live). All passing.
+- **QA:** Playwright — verified banner renders with correct count, navigates to /calls/live on click, disappears at count 0. All checks passed.
 
 ### Blocked until answered
 
@@ -1136,14 +1148,14 @@ This is tedious and error-prone. The improved flow should store the OAuth client
 
 ### Acceptance criteria
 
-- [ ] **Server-side OAuth client credentials.** The server reads `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from environment variables (or `.env`). These are set once during deployment and shared across all Google Calendar integrations.
-- [ ] **One-click connect button.** On the Integrations page, adding a Google Calendar integration shows a "Connect with Google" button instead of form fields for `client_id` / `client_secret`. The user only provides an optional integration name.
-- [ ] **OAuth redirect flow.** Clicking "Connect with Google" calls a server endpoint that returns the Google OAuth consent URL. The browser redirects (or opens a popup) to that URL. After consent, Google redirects back to the server callback.
-- [ ] **Automatic integration creation.** The OAuth callback creates (or updates) the integration record with the `refresh_token`, `access_token`, and a default `calendar_id` of `"primary"`. The user is redirected back to the Integrations page with a success message.
-- [ ] **Calendar picker (post-connect).** After connecting, the integration card shows the connected calendar name and a dropdown to switch calendars (fetched via the Calendar API using the stored tokens).
-- [ ] **Backwards compatibility.** Existing integrations with manually entered `client_id` / `client_secret` continue to work. The server uses per-integration credentials if present, falling back to the global env vars.
-- [ ] **Graceful degradation.** If `GOOGLE_CLIENT_ID` is not set, the UI falls back to the current manual form (with a message like "Ask your admin to configure Google OAuth credentials").
-- [ ] **Disconnect.** A "Disconnect" button on the integration card revokes the refresh token and clears stored tokens.
+- [x] **Server-side OAuth client credentials.** The server reads `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from environment variables (or `.env`). These are set once during deployment and shared across all Google Calendar integrations.
+- [x] **One-click connect button.** On the Integrations page, adding a Google Calendar integration shows a "Connect with Google" button instead of form fields for `client_id` / `client_secret`. The user only provides an optional integration name.
+- [x] **OAuth redirect flow.** Clicking "Connect with Google" calls a server endpoint that returns the Google OAuth consent URL. The browser redirects (or opens a popup) to that URL. After consent, Google redirects back to the server callback.
+- [x] **Automatic integration creation.** The OAuth callback creates (or updates) the integration record with the `refresh_token`, `access_token`, and a default `calendar_id` of `"primary"`. The user is redirected back to the Integrations page with a success message.
+- [x] **Calendar picker (post-connect).** After connecting, the integration card shows the connected calendar name and a dropdown to switch calendars (fetched via the Calendar API using the stored tokens).
+- [x] **Backwards compatibility.** Existing integrations with manually entered `client_id` / `client_secret` continue to work. The server uses per-integration credentials if present, falling back to the global env vars.
+- [x] **Graceful degradation.** If `GOOGLE_CLIENT_ID` is not set, the UI falls back to the current manual form (with a message like "Ask your admin to configure Google OAuth credentials").
+- [x] **Disconnect.** A "Disconnect" button on the integration card revokes the refresh token and clears stored tokens.
 
 ### Technical notes
 
@@ -1179,6 +1191,201 @@ This is tedious and error-prone. The improved flow should store the OAuth client
 
 - **Server:** `/api/integrations/google/status` returns `{ configured: false }` when env vars missing, `{ configured: true }` when set. `/api/integrations/google/connect` returns a valid Google OAuth URL. OAuth callback creates integration with tokens. `/api/integrations/{id}/calendars` returns calendar list. Existing manual-credential integrations still pass validation.
 - **Web:** "Connect with Google" button renders when server reports `configured: true`. Manual form renders when `configured: false`. Success toast appears on redirect with `?google=connected`. Calendar dropdown renders and updates integration.
+
+### Completion
+
+- **Commit:** `8364078` Story 21: one-click Google Calendar OAuth setup
+- **Tests:** 11 server tests (OAuth status, connect, callback, calendars, backwards compat) + 9 web tests (button visibility, connect flow, toast, badge, calendars, disconnect, fallback). 315 server + 103 web = 418 total passing.
+- **QA:** Playwright — verified "Connect with Google" button visible with env vars, redirect to Google consent URL, success toast on `?google=connected`, Connected badge + Calendars + Disconnect buttons, graceful degradation without env vars. 5/5 checks passed.
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.
+
+---
+
+## Story 22 — User accounts & multi-tenant isolation
+
+As a **platform host**, I want **multiple users to register their own accounts and have isolated data**, so that **I can demo Pronto to prospects who each get their own workspace without seeing each other's data**.
+
+### Background
+
+Currently the app uses a single shared `CALLME_API_KEY` for authentication. Everyone who logs in sees the same workflows, call logs, phone numbers, integrations, and settings. For a demo scenario, the host wants to:
+
+1. Give a prospect a URL and say "sign up and try it."
+2. Each prospect gets their own isolated workspace — their own workflows, API keys, call logs.
+3. The host can also log in and manage their own workspace.
+
+This requires replacing the single API key auth with proper user accounts (email + password), adding a `user_id` foreign key to every tenant-scoped table, and filtering all queries by the authenticated user.
+
+### Acceptance criteria
+
+- [ ] **Registration endpoint.** `POST /api/auth/register` accepts `{ email, password, name }` and creates a user account. Passwords are hashed with bcrypt. Returns a JWT token.
+- [ ] **Login endpoint.** `POST /api/auth/login` accepts `{ email, password }` (in addition to the existing API key flow for backwards compat). Returns a JWT token with `user_id` claim and configurable expiry (default 7 days).
+- [ ] **JWT auth middleware.** All protected endpoints accept `Authorization: Bearer <jwt>`. The existing API key auth continues to work as a "superuser/admin" bypass.
+- [ ] **User model.** New `User` table: `id`, `email` (unique), `password_hash`, `name`, `created_at`.
+- [ ] **Tenant isolation.** `Workflow`, `Call`, `PhoneNumber`, `Integration`, and `Setting` models gain a `user_id` foreign key. All CRUD queries filter by the authenticated user's ID.
+- [ ] **Migration of existing data.** On first startup after upgrade, if existing rows have no `user_id`, they are assigned to a default "admin" user (auto-created from `CALLME_API_KEY` if set).
+- [ ] **Registration page.** New `/register` page with email, password, name fields and a "Sign up" button. Link to `/login` for existing users.
+- [ ] **Login page updated.** Add email + password fields alongside (or replacing) the API key field. Link to `/register` for new users.
+- [ ] **Token storage.** JWT stored in `localStorage` (replacing the raw API key). Auto-refresh or re-login on expiry.
+- [ ] **User menu.** AppShell shows the logged-in user's name/email and a "Sign Out" button.
+
+### Technical notes
+
+#### Server changes
+
+- **New dependency:** `PyJWT` for token generation/verification, `bcrypt` (or `passlib`) for password hashing.
+- **`User` model** in `app/db/models.py` (or new `app/db/user.py`).
+- **Updated `app/auth.py`:** `get_current_user()` dependency extracts `user_id` from JWT, falls back to API key check for admin access.
+- **Tenant filter helper:** A reusable dependency or mixin that injects `.where(Model.user_id == current_user.id)` on all queries.
+- **Schema migration:** Since there's no Alembic, use a startup check: if the `user` table doesn't exist, run `CREATE TABLE`. If existing rows lack `user_id`, backfill them.
+
+#### Web changes
+
+- **New pages:** `/register`, updated `/login`.
+- **Auth context:** Store JWT, decode it client-side for user info (name, email), expose via React context.
+- **API client:** No change needed — already sends `Authorization: Bearer <token>`.
+
+### Implementation tasks
+
+1. **Server — User model & auth endpoints** (`register`, `login`, JWT generation).
+2. **Server — JWT middleware** (update `get_current_user` dependency).
+3. **Server — Add `user_id` FK** to Workflow, Call, PhoneNumber, Integration, Setting.
+4. **Server — Tenant-scoped queries** (filter all CRUD by `user_id`).
+5. **Server — Data migration** (backfill existing rows on startup).
+6. **Web — Registration page.**
+7. **Web — Updated login page** (email + password).
+8. **Web — Auth context & token management.**
+9. **Tests:** Registration, login, JWT validation, tenant isolation (user A can't see user B's data).
+
+### Unit tests
+
+- **Server:** Register creates user, rejects duplicate email. Login returns JWT for valid credentials, rejects invalid. JWT middleware extracts user_id. Tenant isolation: user A's workflows are invisible to user B. API key auth still works as admin. Migration backfills existing data.
+- **Web:** Register form submits and redirects to setup. Login form works with email/password. Auth context provides user info. Sign out clears token.
+
+### QA verification
+
+- Register a new user → lands on setup wizard.
+- Log in as that user → sees empty workspace.
+- Create a workflow → log out → register a second user → second user sees no workflows.
+- Log back in as first user → workflow is still there.
+- Use API key auth → can see all data (admin mode).
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.
+
+---
+
+## Story 23 — Per-user setup wizard & shared platform keys
+
+As a **new user**, I want **the setup wizard to guide me through entering my own API keys OR using the platform's shared keys**, so that **I can start building workflows immediately without needing my own Twilio/Deepgram/ElevenLabs/OpenAI accounts**.
+
+### Background
+
+After Story 22, each user has an isolated workspace. But the setup wizard currently stores settings globally — all users share the same API keys. For the demo scenario:
+
+- **The host** sets up their own Twilio, Deepgram, ElevenLabs, and OpenAI keys in `.env` (platform keys).
+- **A prospect** signs up and can either: (a) use the platform's shared keys to try things out immediately, or (b) enter their own keys for a fully independent setup.
+
+This requires per-user settings storage and a "use platform defaults" toggle in the wizard.
+
+### Acceptance criteria
+
+- [ ] **Per-user settings.** The `Setting` table rows are scoped to `user_id`. Each user has their own set of API keys.
+- [ ] **Platform defaults.** If the host sets API keys in `.env`, new users see a "Use platform keys" option in the setup wizard. Selecting it copies the platform values into the user's settings.
+- [ ] **Setup wizard "shared mode" toggle.** Step 2 (API Keys) shows: "Use platform keys (recommended for quick start)" vs "Enter your own API keys". Platform keys option only appears if the server has them configured.
+- [ ] **Per-user phone number.** Each user can configure their own Twilio phone number. The webhook handler routes incoming calls to the correct user's workflow based on the dialled number.
+- [ ] **Call routing by phone number.** When a call arrives on a Twilio number, the server looks up which user owns that number and loads their workflow + credentials.
+- [ ] **Credential isolation.** User A's API keys are never visible to User B, even via API.
+- [ ] **Platform status endpoint.** `GET /api/platform/status` returns which services have platform-level keys configured (so the web can show the "use platform keys" option).
+
+### Technical notes
+
+- **Call routing:** The webhook handler receives the `To` phone number. Look up `PhoneNumber` by number → get `user_id` → load that user's settings and active workflow.
+- **Credential resolution:** `get_credential(key, user_id)` checks user's DB settings first, then falls back to platform `.env` values if the user opted in.
+- **Platform keys flag:** A boolean `use_platform_keys` in the user's settings (or a per-service flag) indicating they want to use the host's keys.
+
+### Implementation tasks
+
+1. **Server — Per-user credential resolution** (update `get_credential` to accept `user_id`).
+2. **Server — Platform status endpoint.**
+3. **Server — Call routing by phone number** (update webhook handler).
+4. **Web — Setup wizard shared mode toggle.**
+5. **Web — Per-user settings page** (show which keys are "platform" vs "own").
+6. **Tests:** Credential resolution priority, call routing, platform status.
+
+### Unit tests
+
+- **Server:** `get_credential("openai_api_key", user_id=1)` returns user's key if set, platform key if user opted in, empty if neither. Call routing resolves correct user from phone number. Platform status reports correctly.
+- **Web:** Setup wizard shows "Use platform keys" when platform has keys. Selecting it skips manual key entry. Settings page shows "Using platform keys" badge.
+
+### QA verification
+
+- Host sets API keys in `.env`. New user registers → setup wizard shows "Use platform keys" option.
+- User selects platform keys → can create and publish a workflow without entering any API keys.
+- User with own keys: enters their own OpenAI key → that key is used for their calls, not the platform key.
+- Two users with different phone numbers both receive calls routed to their own workflows.
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.
+
+---
+
+## Story 24 — Docker demo mode & one-command startup
+
+As a **platform host**, I want **a single `docker compose up` to start a fully working demo environment**, so that **I can have Pronto running on my laptop and ready to show within 60 seconds**.
+
+### Background
+
+The Docker Compose setup already works but has rough edges for the demo scenario:
+
+- `PUBLIC_URL` must be set manually (ngrok URL for Twilio webhooks).
+- No pre-seeded data — every fresh start requires running through the full setup wizard.
+- No easy way to reset the demo without deleting the DB file.
+
+### Acceptance criteria
+
+- [ ] **Single-command start.** `docker compose up` (or `make demo`) starts the server, web UI (nginx), and optionally an ngrok sidecar container — everything needed for a working demo.
+- [ ] **ngrok sidecar (optional).** A `tunnels` service in `docker-compose.yml` runs ngrok, and the server auto-detects the tunnel URL on startup (via ngrok's local API at `http://tunnels:4040/api/tunnels`). If ngrok is not running or `PUBLIC_URL` is set manually, it's used as-is.
+- [ ] **Auto-detect PUBLIC_URL.** On startup, the server checks: (1) `PUBLIC_URL` env var, (2) ngrok API, (3) falls back to `http://localhost:3000`. The resolved URL is stored in the DB settings so the webhook handler can use it without restart.
+- [ ] **Demo seed data.** A `make seed` or startup flag (`SEED_DEMO=true`) populates the DB with: a demo user account, an impressive sample workflow (e.g. a dental office receptionist), and a few synthetic call log entries so the dashboard isn't empty.
+- [ ] **Demo reset.** `POST /api/admin/reset` (admin-only, guarded by `CALLME_API_KEY`) wipes all user data and re-seeds. Web UI has a "Reset Demo" button in an admin settings area.
+- [ ] **Makefile.** Root-level `Makefile` with targets: `make demo` (docker compose up), `make dev` (local server + web + ngrok), `make test` (server + web tests), `make seed`, `make reset`.
+- [ ] **Dynamic CORS.** CORS `allow_origins` includes the resolved `PUBLIC_URL` origin + localhost dev ports, so the web UI works regardless of how it's accessed.
+- [ ] **Health dashboard.** `GET /health` returns service connectivity status (can reach Twilio, Deepgram, ElevenLabs, OpenAI) so the host can verify everything is wired up.
+
+### Technical notes
+
+- **ngrok sidecar:** Use the official `ngrok/ngrok` Docker image. Config: `ngrok http server:3000`. The server polls `http://tunnels:4040/api/tunnels` on startup.
+- **Dynamic CORS middleware:** Write a custom CORS middleware (or use `allow_origin_regex`) that reads the current `PUBLIC_URL` from DB settings on each request.
+- **Seed script:** `server/scripts/seed_demo.py` — creates a user, workflow, phone number config, and synthetic call logs.
+
+### Implementation tasks
+
+1. **Server — PUBLIC_URL auto-detection** (ngrok API check on startup, store in DB).
+2. **Server — Dynamic CORS** from resolved PUBLIC_URL.
+3. **Server — Seed script & `/api/admin/reset` endpoint.**
+4. **Server — Enhanced `/health` endpoint** (check external service connectivity).
+5. **Docker — ngrok sidecar** in `docker-compose.yml`.
+6. **Root Makefile** with demo/dev/test/seed/reset targets.
+7. **Web — Admin "Reset Demo" button** (visible only when `CALLME_API_KEY` auth is used).
+8. **Tests:** Auto-detection logic, CORS dynamic origins, seed script idempotency, reset endpoint.
+
+### Unit tests
+
+- **Server:** `PUBLIC_URL` resolution: returns env var if set, ngrok URL if available, localhost fallback. CORS includes PUBLIC_URL origin. Seed script creates expected records. Reset endpoint clears data and re-seeds. Health endpoint reports service status.
+- **Web:** Admin reset button visible for admin auth, hidden for regular users.
+
+### QA verification
+
+- `docker compose up` with `NGROK_AUTHTOKEN` set → server auto-detects ngrok URL, Twilio webhooks work.
+- Fresh start with `SEED_DEMO=true` → dashboard shows sample workflow and call logs.
+- Click "Reset Demo" → data wiped, setup wizard re-appears, seed data re-populated.
+- `make dev` starts server + web locally.
+- `make test` runs all tests.
 
 ### Blocked until answered
 
