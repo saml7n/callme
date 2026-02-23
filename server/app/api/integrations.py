@@ -31,10 +31,10 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.auth import require_auth
+from app.auth import get_current_user, require_auth
 from app.config import settings
 from app.crypto import decrypt, encrypt
-from app.db.models import Integration, IntegrationType, Workflow
+from app.db.models import Integration, IntegrationType, User, Workflow
 from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -158,8 +158,13 @@ _VALIDATORS = {
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[IntegrationOut])
-async def list_integrations(session: Session = Depends(get_session)) -> list[IntegrationOut]:
-    integrations = session.exec(select(Integration)).all()
+async def list_integrations(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[IntegrationOut]:
+    integrations = session.exec(
+        select(Integration).where(Integration.user_id == user.id)
+    ).all()
     return [_to_out(i) for i in integrations]
 
 
@@ -167,6 +172,7 @@ async def list_integrations(session: Session = Depends(get_session)) -> list[Int
 async def create_integration(
     body: IntegrationCreate,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> IntegrationOut:
     validator = _VALIDATORS.get(body.type)
     if validator:
@@ -176,6 +182,7 @@ async def create_integration(
         type=body.type,
         name=body.name,
         config_encrypted=encrypt(json.dumps(body.config)),
+        user_id=user.id,
     )
     session.add(integration)
     session.commit()
@@ -189,9 +196,10 @@ async def update_integration(
     integration_id: UUID,
     body: IntegrationUpdate,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> IntegrationOut:
     integration = session.get(Integration, integration_id)
-    if integration is None:
+    if integration is None or integration.user_id != user.id:
         raise HTTPException(status_code=404, detail="Integration not found")
 
     if body.name is not None:
@@ -215,9 +223,10 @@ async def update_integration(
 async def delete_integration(
     integration_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> None:
     integration = session.get(Integration, integration_id)
-    if integration is None:
+    if integration is None or integration.user_id != user.id:
         raise HTTPException(status_code=404, detail="Integration not found")
 
     # Check if any active workflow references this integration
@@ -251,9 +260,10 @@ async def delete_integration(
 async def test_integration(
     integration_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> TestResult:
     integration = session.get(Integration, integration_id)
-    if integration is None:
+    if integration is None or integration.user_id != user.id:
         raise HTTPException(status_code=404, detail="Integration not found")
 
     config = _decrypt_config(integration)
@@ -338,10 +348,11 @@ async def oauth_start(
     integration_id: UUID,
     request: Request,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Return the Google OAuth consent URL for the user to visit."""
     integration = session.get(Integration, integration_id)
-    if integration is None:
+    if integration is None or integration.user_id != user.id:
         raise HTTPException(status_code=404, detail="Integration not found")
     if integration.type != IntegrationType.google_calendar:
         raise HTTPException(status_code=400, detail="OAuth is only for Google Calendar integrations")
@@ -509,11 +520,14 @@ async def google_oauth_callback(
     if "access_token" in tokens:
         config["access_token"] = tokens["access_token"]
 
-    # Auto-create the integration
+    # Auto-create the integration (assign to admin user since OAuth callback has no auth)
+    from app.auth import ensure_admin_user
+    admin = ensure_admin_user(session)
     integration = Integration(
         type=IntegrationType.google_calendar,
         name="Google Calendar",
         config_encrypted=encrypt(json.dumps(config)),
+        user_id=admin.id,
     )
     session.add(integration)
     session.commit()
@@ -545,10 +559,11 @@ async def google_oauth_callback(
 async def list_calendars(
     integration_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """List the user's Google Calendar calendars using stored tokens."""
     integration = session.get(Integration, integration_id)
-    if integration is None:
+    if integration is None or integration.user_id != user.id:
         raise HTTPException(status_code=404, detail="Integration not found")
     if integration.type != IntegrationType.google_calendar:
         raise HTTPException(status_code=400, detail="Calendars are only available for Google Calendar integrations")

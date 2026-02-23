@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.db.models import Call, CallEvent, EventType, Workflow
 from app.main import app
+from tests.conftest import TEST_USER_ID
 
 
 class TestCallLogAPI:
@@ -22,7 +23,7 @@ class TestCallLogAPI:
 
     async def test_create_call_and_list(self, db_session):
         """Create a call record directly, then list via API."""
-        call = Call(call_sid="CA123", from_number="+44", to_number="+1")
+        call = Call(call_sid="CA123", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call)
         db_session.commit()
         db_session.refresh(call)
@@ -37,7 +38,7 @@ class TestCallLogAPI:
 
     async def test_call_detail_with_events(self, db_session):
         """Create call + events, then verify detail endpoint."""
-        call = Call(call_sid="CA456", from_number="+44", to_number="+1")
+        call = Call(call_sid="CA456", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call)
         db_session.commit()
         db_session.refresh(call)
@@ -81,13 +82,13 @@ class TestCallLogAPI:
         """Calls returned most-recent first."""
         import time
 
-        call_a = Call(call_sid="CA_old", from_number="+44", to_number="+1")
+        call_a = Call(call_sid="CA_old", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call_a)
         db_session.commit()
 
         time.sleep(0.01)  # ensure different timestamps
 
-        call_b = Call(call_sid="CA_new", from_number="+44", to_number="+1")
+        call_b = Call(call_sid="CA_new", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call_b)
         db_session.commit()
 
@@ -108,6 +109,7 @@ class TestCallLogAPI:
             to_number="+1",
             ended_at=now,
             duration_seconds=60,
+            user_id=TEST_USER_ID,
         )
         db_session.add(call)
         db_session.commit()
@@ -120,7 +122,7 @@ class TestCallLogAPI:
 
     async def test_status_in_progress(self, db_session):
         """A call with no ended_at → in_progress."""
-        call = Call(call_sid="CA_live", from_number="+44", to_number="+1")
+        call = Call(call_sid="CA_live", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call)
         db_session.commit()
         db_session.refresh(call)
@@ -138,6 +140,7 @@ class TestCallLogAPI:
             from_number="+44",
             to_number="+1",
             ended_at=now,
+            user_id=TEST_USER_ID,
         )
         db_session.add(call)
         db_session.commit()
@@ -163,6 +166,7 @@ class TestCallLogAPI:
             from_number="+44",
             to_number="+1",
             ended_at=now,
+            user_id=TEST_USER_ID,
         )
         db_session.add(call)
         db_session.commit()
@@ -185,6 +189,7 @@ class TestCallLogAPI:
         wf = Workflow(
             name="Reception",
             graph_json={"nodes": [], "edges": [], "entry_node_id": "n1"},
+            user_id=TEST_USER_ID,
         )
         db_session.add(wf)
         db_session.commit()
@@ -195,6 +200,7 @@ class TestCallLogAPI:
             from_number="+44",
             to_number="+1",
             workflow_id=wf.id,
+            user_id=TEST_USER_ID,
         )
         db_session.add(call)
         db_session.commit()
@@ -211,7 +217,7 @@ class TestCallLogAPI:
 
     async def test_workflow_name_null(self, db_session):
         """Call without a workflow returns null workflow_name."""
-        call = Call(call_sid="CA_nowf", from_number="+44", to_number="+1")
+        call = Call(call_sid="CA_nowf", from_number="+44", to_number="+1", user_id=TEST_USER_ID)
         db_session.add(call)
         db_session.commit()
         db_session.refresh(call)
@@ -230,6 +236,7 @@ class TestCallLogAPI:
                 call_sid=f"CA_p{i}",
                 from_number="+44",
                 to_number="+1",
+                user_id=TEST_USER_ID,
             ))
         db_session.commit()
 

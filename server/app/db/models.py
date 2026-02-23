@@ -1,11 +1,13 @@
 """SQLModel database models for CallMe.
 
 Tables:
+- User — registered user accounts.
 - Workflow — workflow definitions with graph JSON.
 - PhoneNumber — registered phone numbers with workflow assignment.
 - Integration — external service integrations (Google Calendar, webhook, etc.).
 - Call — call records with metadata.
 - CallEvent — timestamped events within a call.
+- Setting — per-user key-value settings (API keys, config).
 """
 
 import enum
@@ -13,11 +15,27 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
-from sqlmodel import JSON, Column, Field, SQLModel
+from sqlmodel import JSON, Column, Field, SQLModel, UniqueConstraint
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# User
+# ---------------------------------------------------------------------------
+
+class User(SQLModel, table=True):
+    """A registered user account."""
+
+    __tablename__ = "users"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(index=True, unique=True)
+    password_hash: str = Field(default="")
+    name: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +53,7 @@ class Workflow(SQLModel, table=True):
     graph_json: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     is_active: bool = Field(default=False, index=True)
     phone_number: Optional[str] = Field(default=None, index=True)
+    user_id: Optional[UUID] = Field(default=None, foreign_key="users.id", index=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -52,6 +71,7 @@ class PhoneNumber(SQLModel, table=True):
     number: str = Field(index=True, unique=True)  # E.164 format
     label: str = Field(default="")
     workflow_id: Optional[UUID] = Field(default=None, foreign_key="workflows.id")
+    user_id: Optional[UUID] = Field(default=None, foreign_key="users.id", index=True)
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -78,6 +98,7 @@ class Integration(SQLModel, table=True):
         default="",
         description="Fernet-encrypted JSON blob of credentials/config.",
     )
+    user_id: Optional[UUID] = Field(default=None, foreign_key="users.id", index=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -96,6 +117,7 @@ class Call(SQLModel, table=True):
     from_number: str = Field(default="")
     to_number: str = Field(default="")
     workflow_id: Optional[UUID] = Field(default=None, foreign_key="workflows.id")
+    user_id: Optional[UUID] = Field(default=None, foreign_key="users.id", index=True)
     started_at: datetime = Field(default_factory=_utcnow)
     ended_at: Optional[datetime] = Field(default=None)
     duration_seconds: Optional[float] = Field(default=None)
@@ -129,19 +151,22 @@ class CallEvent(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Setting (key-value store for API keys & service config)
+# Setting (per-user key-value store for API keys & service config)
 # ---------------------------------------------------------------------------
 
 class Setting(SQLModel, table=True):
-    """A key-value setting with encrypted value.
+    """A per-user key-value setting with encrypted value.
 
     Used for API keys (Twilio, Deepgram, ElevenLabs, OpenAI) and service
     configuration (phone numbers, admin phone). Values are Fernet-encrypted
-    at rest.
+    at rest.  Scoped by ``user_id`` so each user has their own settings.
     """
 
     __tablename__ = "settings"
+    __table_args__ = (UniqueConstraint("user_id", "key"),)
 
-    key: str = Field(primary_key=True)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    key: str = Field(index=True)
+    user_id: Optional[UUID] = Field(default=None, foreign_key="users.id", index=True)
     value_encrypted: str = Field(default="", description="Fernet-encrypted value.")
     updated_at: datetime = Field(default_factory=_utcnow)

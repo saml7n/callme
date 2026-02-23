@@ -1,4 +1,4 @@
-/** Unit tests for login page, auth guard, and auth token store. */
+/** Unit tests for login page, register page, auth guard, and auth token store. */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -10,7 +10,10 @@ vi.mock('@/lib/api', () => ({
   api: {
     auth: {
       login: vi.fn(),
+      loginWithKey: vi.fn(),
+      register: vi.fn(),
       check: vi.fn(),
+      me: vi.fn(),
     },
   },
 }))
@@ -27,12 +30,14 @@ vi.mock('@/lib/auth', async () => {
       token = null
     }),
     isAuthenticated: vi.fn(() => !!token),
+    getUserInfo: vi.fn(() => null),
   }
 })
 
 import { api } from '@/lib/api'
 import { isAuthenticated, setToken, clearToken } from '@/lib/auth'
 import Login from '@/pages/Login'
+import Register from '@/pages/Register'
 import AuthGuard from '@/components/AuthGuard'
 
 // ---------------------------------------------------------------------------
@@ -44,7 +49,20 @@ function renderLogin() {
     <MemoryRouter initialEntries={['/login']}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<div>Register Page</div>} />
         <Route path="/" element={<div>Home Page</div>} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function renderRegister() {
+  return render(
+    <MemoryRouter initialEntries={['/register']}>
+      <Routes>
+        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<div>Login Page</div>} />
+        <Route path="/setup" element={<div>Setup Page</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -78,49 +96,139 @@ describe('Login', () => {
     ;(clearToken as ReturnType<typeof vi.fn>)()
   })
 
-  it('renders the login form', () => {
+  it('renders the email + password login form by default', () => {
     renderLogin()
     expect(screen.getByText('Pronto')).toBeInTheDocument()
-    expect(screen.getByLabelText('API Key')).toBeInTheDocument()
+    expect(screen.getByLabelText('Email')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
   })
 
-  it('disables button when input is empty', () => {
+  it('disables button when both fields are empty', () => {
     renderLogin()
     expect(screen.getByRole('button', { name: /sign in/i })).toBeDisabled()
   })
 
-  it('navigates to / on successful login', async () => {
+  it('navigates to / on successful email login', async () => {
     const user = userEvent.setup()
     ;(api.auth.login as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
-      token: 'test-token-123',
+      token: 'jwt-token-123',
+      user: { id: '1', email: 'test@x.com', name: 'Test' },
     })
 
     renderLogin()
-    await user.type(screen.getByLabelText('API Key'), 'my-secret-key')
+    await user.type(screen.getByLabelText('Email'), 'test@x.com')
+    await user.type(screen.getByLabelText('Password'), 'mypassword')
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
     await waitFor(() => {
-      expect(api.auth.login).toHaveBeenCalledWith('my-secret-key')
-      expect(setToken).toHaveBeenCalledWith('test-token-123')
+      expect(api.auth.login).toHaveBeenCalledWith('test@x.com', 'mypassword')
+      expect(setToken).toHaveBeenCalledWith('jwt-token-123')
       expect(screen.getByText('Home Page')).toBeInTheDocument()
     })
   })
 
-  it('shows error on invalid key', async () => {
+  it('shows error on invalid credentials', async () => {
     const user = userEvent.setup()
     ;(api.auth.login as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('Unauthorized'),
     )
 
     renderLogin()
-    await user.type(screen.getByLabelText('API Key'), 'wrong-key')
+    await user.type(screen.getByLabelText('Email'), 'test@x.com')
+    await user.type(screen.getByLabelText('Password'), 'wrong')
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Invalid API key')).toBeInTheDocument()
+      expect(screen.getByText('Invalid email or password')).toBeInTheDocument()
     })
+  })
+
+  it('can toggle to API key mode and login', async () => {
+    const user = userEvent.setup()
+    ;(api.auth.loginWithKey as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      token: 'jwt-from-key',
+    })
+
+    renderLogin()
+    await user.click(screen.getByText('Use API key instead'))
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('API Key'), 'my-api-key')
+    await user.click(screen.getByRole('button', { name: /sign in/i }))
+
+    await waitFor(() => {
+      expect(api.auth.loginWithKey).toHaveBeenCalledWith('my-api-key')
+      expect(setToken).toHaveBeenCalledWith('jwt-from-key')
+      expect(screen.getByText('Home Page')).toBeInTheDocument()
+    })
+  })
+
+  it('has a link to the register page', () => {
+    renderLogin()
+    expect(screen.getByText('Sign up')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Register page
+// ---------------------------------------------------------------------------
+
+describe('Register', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(clearToken as ReturnType<typeof vi.fn>)()
+  })
+
+  it('renders the registration form', () => {
+    renderRegister()
+    expect(screen.getByLabelText('Email')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument()
+  })
+
+  it('navigates to /setup on successful registration', async () => {
+    const user = userEvent.setup()
+    ;(api.auth.register as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      token: 'jwt-new-user',
+      user: { id: '2', email: 'new@x.com', name: 'New' },
+    })
+
+    renderRegister()
+    await user.type(screen.getByLabelText('Email'), 'new@x.com')
+    await user.type(screen.getByLabelText('Name'), 'New')
+    await user.type(screen.getByLabelText('Password'), 'password123')
+    await user.click(screen.getByRole('button', { name: /sign up/i }))
+
+    await waitFor(() => {
+      expect(api.auth.register).toHaveBeenCalledWith('new@x.com', 'password123', 'New')
+      expect(setToken).toHaveBeenCalledWith('jwt-new-user')
+      expect(screen.getByText('Setup Page')).toBeInTheDocument()
+    })
+  })
+
+  it('shows error on failure', async () => {
+    const user = userEvent.setup()
+    ;(api.auth.register as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Email already registered'),
+    )
+
+    renderRegister()
+    await user.type(screen.getByLabelText('Email'), 'dup@x.com')
+    await user.type(screen.getByLabelText('Password'), 'password123')
+    await user.click(screen.getByRole('button', { name: /sign up/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('register-error')).toBeInTheDocument()
+    })
+  })
+
+  it('has a link to the login page', () => {
+    renderRegister()
+    expect(screen.getByText('Sign in')).toBeInTheDocument()
   })
 })
 

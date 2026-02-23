@@ -99,10 +99,10 @@ def build_mark_message(stream_sid: str, name: str) -> str:
     return json.dumps({"event": "mark", "streamSid": stream_sid, "mark": {"name": name}})
 
 
-def _load_active_workflow() -> tuple[dict[str, Any] | None, Any, str]:
+def _load_active_workflow() -> tuple[dict[str, Any] | None, Any, str, Any]:
     """Load the active workflow from the DB, with fallback to disk.
 
-    Returns (workflow_dict, workflow_db_id, workflow_name).
+    Returns (workflow_dict, workflow_db_id, workflow_name, user_id).
     """
     try:
         session = next(get_session())
@@ -111,14 +111,14 @@ def _load_active_workflow() -> tuple[dict[str, Any] | None, Any, str]:
         ).first()
         if db_wf is not None:
             logger.info("Loaded active workflow from DB: %s (id=%s)", db_wf.name, db_wf.id)
-            return db_wf.graph_json, db_wf.id, db_wf.name
+            return db_wf.graph_json, db_wf.id, db_wf.name, db_wf.user_id
     except Exception:
         logger.exception("Failed to load workflow from DB")
 
     if _FALLBACK_WORKFLOW is not None:
         logger.info("Using fallback workflow from disk")
-        return _FALLBACK_WORKFLOW, None, "Fallback"
-    return None, None, ""
+        return _FALLBACK_WORKFLOW, None, "Fallback", None
+    return None, None, "", None
 
 
 def _create_call_record(
@@ -126,6 +126,7 @@ def _create_call_record(
     from_number: str,
     to_number: str,
     workflow_id: Any | None,
+    user_id: Any | None = None,
 ) -> Call | None:
     """Create a Call record in the database. Returns the Call or None on error."""
     try:
@@ -135,6 +136,7 @@ def _create_call_record(
             from_number=from_number,
             to_number=to_number,
             workflow_id=workflow_id,
+            user_id=user_id,
         )
         session.add(call)
         session.commit()
@@ -175,7 +177,7 @@ async def media_stream(ws: WebSocket) -> None:
                 # Start the full voice pipeline
                 try:
                     # Load active workflow from DB (falls back to disk)
-                    workflow_dict, workflow_db_id, workflow_name = _load_active_workflow()
+                    workflow_dict, workflow_db_id, workflow_name, workflow_user_id = _load_active_workflow()
 
                     # Create a call record in the database
                     call_record = _create_call_record(
@@ -183,6 +185,7 @@ async def media_stream(ws: WebSocket) -> None:
                         from_number="",  # populated by Twilio webhook if needed
                         to_number="",
                         workflow_id=workflow_db_id,
+                        user_id=workflow_user_id,
                     )
                     call_logger = CallLogger(call_record.id) if call_record else None
                     call_id_str = str(call_record.id) if call_record else ""

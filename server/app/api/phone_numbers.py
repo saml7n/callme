@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.auth import require_auth
-from app.db.models import PhoneNumber, Workflow
+from app.auth import get_current_user, require_auth
+from app.db.models import PhoneNumber, User, Workflow
 from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -79,10 +79,13 @@ def _enrich_with_workflow_name(
 @router.get("", response_model=list[PhoneNumberResponse])
 async def list_phone_numbers(
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[PhoneNumberResponse]:
-    """List all registered phone numbers with their workflow assignment."""
+    """List all registered phone numbers for the current user."""
     phones = session.exec(
-        select(PhoneNumber).order_by(PhoneNumber.updated_at.desc())
+        select(PhoneNumber)
+        .where(PhoneNumber.user_id == user.id)
+        .order_by(PhoneNumber.updated_at.desc())
     ).all()
     return [_enrich_with_workflow_name(p, session) for p in phones]
 
@@ -91,16 +94,17 @@ async def list_phone_numbers(
 async def create_phone_number(
     body: PhoneNumberCreate,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> PhoneNumberResponse:
-    """Register a new phone number."""
-    # Check for duplicate
+    """Register a new phone number for the current user."""
+    # Check for duplicate (globally unique)
     existing = session.exec(
         select(PhoneNumber).where(PhoneNumber.number == body.number)
     ).first()
     if existing is not None:
         raise HTTPException(status_code=409, detail="Phone number already registered")
 
-    phone = PhoneNumber(number=body.number, label=body.label)
+    phone = PhoneNumber(number=body.number, label=body.label, user_id=user.id)
     session.add(phone)
     session.commit()
     session.refresh(phone)
@@ -112,10 +116,11 @@ async def create_phone_number(
 async def delete_phone_number(
     phone_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> None:
-    """Remove a phone number. Blocked if assigned to an active workflow."""
+    """Remove a phone number (must belong to current user). Blocked if assigned to an active workflow."""
     phone = session.get(PhoneNumber, phone_id)
-    if phone is None:
+    if phone is None or phone.user_id != user.id:
         raise HTTPException(status_code=404, detail="Phone number not found")
 
     if phone.workflow_id is not None:

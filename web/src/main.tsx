@@ -6,6 +6,7 @@ import App from './App'
 import AuthGuard from './components/AuthGuard'
 import AppShell from './components/AppShell'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import WorkflowPreview from './pages/WorkflowPreview'
 import WorkflowBuilder from './pages/WorkflowBuilder'
 import WorkflowList from './pages/WorkflowList'
@@ -22,6 +23,7 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         {/* All authenticated routes share the AppShell nav bar */}
         <Route element={<AuthGuard><AppShell /></AuthGuard>}>
           <Route path="/" element={<App />} />

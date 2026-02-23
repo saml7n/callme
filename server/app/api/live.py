@@ -15,7 +15,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.auth import require_auth
+from app.auth import get_current_user, require_auth
 from app.credentials import (
     get_admin_phone_number,
     get_twilio_account_sid,
@@ -23,6 +23,7 @@ from app.credentials import (
     get_twilio_api_key_sid,
     get_twilio_auth_token,
 )
+from app.db.models import User
 from app.events import event_bus
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,10 @@ def _mask_phone(number: str) -> str:
 
 
 @router.post("/api/calls/{call_id}/transfer", dependencies=[Depends(require_auth)])
-async def transfer_call(call_id: UUID) -> dict:
+async def transfer_call(
+    call_id: UUID,
+    user: User = Depends(get_current_user),
+) -> dict:
     """Transfer an active call to the admin's registered phone number.
 
     Uses Twilio REST API to update the call with <Dial> TwiML pointing
@@ -88,7 +92,7 @@ async def transfer_call(call_id: UUID) -> dict:
     if not event_bus.is_active(call_id_str):
         raise HTTPException(status_code=404, detail="Call not active or already ended")
 
-    admin_number = get_admin_phone_number()
+    admin_number = get_admin_phone_number(user_id=user.id)
     if not admin_number:
         raise HTTPException(
             status_code=422,
@@ -100,10 +104,10 @@ async def transfer_call(call_id: UUID) -> dict:
         raise HTTPException(status_code=404, detail="Call SID not available")
 
     # Build Twilio credentials — prefer API Key, fall back to Auth Token
-    account_sid = get_twilio_account_sid()
-    api_key_sid = get_twilio_api_key_sid()
-    api_key_secret = get_twilio_api_key_secret()
-    auth_token = get_twilio_auth_token()
+    account_sid = get_twilio_account_sid(user_id=user.id)
+    api_key_sid = get_twilio_api_key_sid(user_id=user.id)
+    api_key_secret = get_twilio_api_key_secret(user_id=user.id)
+    auth_token = get_twilio_auth_token(user_id=user.id)
 
     if api_key_sid and api_key_secret:
         auth_pair = (api_key_sid, api_key_secret)

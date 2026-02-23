@@ -26,6 +26,7 @@ vi.mock('@/lib/auth', () => {
     setToken: vi.fn((t: string) => { token = t }),
     clearToken: vi.fn(() => { token = null }),
     isAuthenticated: vi.fn(() => !!token),
+    getUserInfo: vi.fn(() => ({ id: 'test-id', email: 'test@example.com', name: 'Test User' })),
   }
 })
 

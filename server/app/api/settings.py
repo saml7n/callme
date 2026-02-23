@@ -12,15 +12,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.auth import require_auth
+from app.auth import get_current_user, require_auth
 from app.crypto import decrypt, encrypt
-from app.db.models import Setting
+from app.db.models import Setting, User
 from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -56,9 +57,18 @@ def _redact(value: str) -> str:
     return "••••" + value[-4:]
 
 
-def get_setting(session: Session, key: str) -> str | None:
-    """Get a decrypted setting value, or None if not set."""
-    row = session.get(Setting, key)
+def get_setting(session: Session, key: str, user_id: UUID | None = None) -> str | None:
+    """Get a decrypted setting value, or None if not set.
+
+    When ``user_id`` is provided, only that user's settings are searched.
+    When ``None``, returns the first matching row (legacy / admin fallback).
+    """
+    if user_id is not None:
+        row = session.exec(
+            select(Setting).where(Setting.key == key, Setting.user_id == user_id)
+        ).first()
+    else:
+        row = session.exec(select(Setting).where(Setting.key == key)).first()
     if row is None or not row.value_encrypted:
         return None
     try:
@@ -68,10 +78,16 @@ def get_setting(session: Session, key: str) -> str | None:
         return None
 
 
-def get_all_settings(session: Session) -> dict[str, str]:
-    """Return all decrypted settings as a dict."""
+def get_all_settings(session: Session, user_id: UUID | None = None) -> dict[str, str]:
+    """Return all decrypted settings as a dict.
+
+    When ``user_id`` is provided, only that user's settings are returned.
+    """
+    stmt = select(Setting)
+    if user_id is not None:
+        stmt = stmt.where(Setting.user_id == user_id)
+    rows = session.exec(stmt).all()
     result: dict[str, str] = {}
-    rows = session.exec(select(Setting)).all()
     for row in rows:
         try:
             val = decrypt(row.value_encrypted) if row.value_encrypted else ""
@@ -107,9 +123,12 @@ class ValidateResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=SettingsOut)
-async def get_settings(session: Session = Depends(get_session)) -> SettingsOut:
-    """Return all settings with redacted values."""
-    all_settings = get_all_settings(session)
+async def get_settings(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> SettingsOut:
+    """Return all settings with redacted values for the current user."""
+    all_settings = get_all_settings(session, user_id=user.id)
     redacted: dict[str, str] = {}
     for key in ALLOWED_KEYS:
         val = all_settings.get(key, "")
@@ -127,13 +146,16 @@ async def get_settings(session: Session = Depends(get_session)) -> SettingsOut:
 async def put_settings(
     body: SettingsPut,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> SettingsOut:
-    """Bulk upsert settings. Only ALLOWED_KEYS are accepted."""
+    """Bulk upsert settings for the current user. Only ALLOWED_KEYS are accepted."""
     now = datetime.now(timezone.utc)
     for key, value in body.settings.items():
         if key not in ALLOWED_KEYS:
             continue
-        existing = session.get(Setting, key)
+        existing = session.exec(
+            select(Setting).where(Setting.key == key, Setting.user_id == user.id)
+        ).first()
         if existing is not None:
             existing.value_encrypted = encrypt(value) if value else ""
             existing.updated_at = now
@@ -141,23 +163,25 @@ async def put_settings(
         else:
             row = Setting(
                 key=key,
+                user_id=user.id,
                 value_encrypted=encrypt(value) if value else "",
                 updated_at=now,
             )
             session.add(row)
     session.commit()
-    logger.info("Settings updated: %s", list(body.settings.keys()))
+    logger.info("Settings updated for user %s: %s", user.id, list(body.settings.keys()))
 
     # Return redacted view
-    return await get_settings(session)
+    return await get_settings(session, user)
 
 
 @router.post("/validate", response_model=ValidateResult)
 async def validate_settings(
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> ValidateResult:
     """Test each configured service and return per-service status."""
-    all_settings = get_all_settings(session)
+    all_settings = get_all_settings(session, user_id=user.id)
     results: dict[str, str] = {}
 
     # Twilio — supports API Key (SID+Secret) or Auth Token for REST auth

@@ -32,6 +32,16 @@ async def lifespan(app: FastAPI):
     api_key = init_api_key()
     logging.getLogger(__name__).info("Auth initialised (key configured: %s)", bool(api_key))
 
+    # Ensure admin user exists and backfill orphaned rows
+    try:
+        from app.db.session import get_session as _get_session
+        from app.auth import ensure_admin_user, backfill_user_ids
+        session = next(_get_session())
+        admin = ensure_admin_user(session)
+        backfill_user_ids(session, admin.id)
+    except Exception:
+        logging.getLogger(__name__).warning("Could not run user backfill — will retry next startup.")
+
     # Check if settings are configured — warn but don't crash
     try:
         from app.db.session import get_session as _get_session

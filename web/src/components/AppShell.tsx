@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { clearToken } from '@/lib/auth'
+import { clearToken, getUserInfo } from '@/lib/auth'
 import { api } from '@/lib/api'
 import LiveCallBanner from '@/components/LiveCallBanner'
 
@@ -26,6 +26,7 @@ export default function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const [warnings, setWarnings] = useState<string[]>([])
+  const userInfo = getUserInfo()
 
   useEffect(() => {
     api.auth.configWarnings()
@@ -75,7 +76,7 @@ export default function AppShell() {
         {/* Centre: live call banner */}
         <LiveCallBanner />
 
-        {/* Right: setup + sign-out */}
+        {/* Right: setup + user + sign-out */}
         <div className="flex items-center gap-3">
           <Link
             to="/setup"
@@ -93,6 +94,11 @@ export default function AppShell() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
           </Link>
+          {userInfo && (
+            <span className="text-gray-400 text-sm hidden sm:inline" data-testid="nav-user-name">
+              {userInfo.name || userInfo.email}
+            </span>
+          )}
           <button
             onClick={handleLogout}
             className="text-gray-500 hover:text-gray-300 text-sm transition"

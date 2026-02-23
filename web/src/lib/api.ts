@@ -56,11 +56,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   auth: {
-    login: (key: string) =>
-      request<{ ok: boolean; token: string }>('/api/auth/login', {
+    login: (email: string, password: string) =>
+      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    loginWithKey: (key: string) =>
+      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ key }),
       }),
+    register: (email: string, password: string, name: string) =>
+      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      }),
+    me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
     check: () => request<{ auth_enabled: boolean }>('/api/auth/check'),
     configWarnings: () => request<{ warnings: string[] }>('/api/auth/config-warnings'),
   },

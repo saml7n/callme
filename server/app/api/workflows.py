@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.auth import require_auth
-from app.db.models import PhoneNumber, Workflow
+from app.auth import get_current_user, require_auth
+from app.db.models import PhoneNumber, User, Workflow
 from app.db.session import get_session
 from app.workflow.schema import Workflow as WorkflowSchema
 
@@ -94,21 +94,29 @@ def _validate_graph(graph_json: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[WorkflowListItem])
-async def list_workflows(session: Session = Depends(get_session)) -> list[Workflow]:
-    """List all workflows (summary view)."""
-    return list(session.exec(select(Workflow).order_by(Workflow.updated_at.desc())).all())
+async def list_workflows(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[Workflow]:
+    """List all workflows for the current user (summary view)."""
+    return list(session.exec(
+        select(Workflow)
+        .where(Workflow.user_id == user.id)
+        .order_by(Workflow.updated_at.desc())
+    ).all())
 
 
 @router.get("/active", response_model=WorkflowDetail)
 async def get_active_workflow(
     phone_number: str | None = None,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Workflow:
-    """Return the currently active workflow, optionally filtered by phone number.
+    """Return the currently active workflow for the current user, optionally filtered by phone number.
 
     If no phone_number is given, returns the first active workflow.
     """
-    stmt = select(Workflow).where(Workflow.is_active == True)  # noqa: E712
+    stmt = select(Workflow).where(Workflow.is_active == True, Workflow.user_id == user.id)  # noqa: E712
     if phone_number:
         stmt = stmt.where(Workflow.phone_number == phone_number)
     workflow = session.exec(stmt).first()
@@ -121,10 +129,11 @@ async def get_active_workflow(
 async def get_workflow(
     workflow_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Workflow:
-    """Get a single workflow by ID."""
+    """Get a single workflow by ID (must belong to current user)."""
     workflow = session.get(Workflow, workflow_id)
-    if workflow is None:
+    if workflow is None or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return workflow
 
@@ -133,13 +142,15 @@ async def get_workflow(
 async def create_workflow(
     body: WorkflowCreate,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Workflow:
-    """Create a new workflow."""
+    """Create a new workflow owned by the current user."""
     _validate_graph(body.graph_json)
 
     workflow = Workflow(
         name=body.name,
         graph_json=body.graph_json,
+        user_id=user.id,
     )
     session.add(workflow)
     session.commit()
@@ -153,10 +164,11 @@ async def update_workflow(
     workflow_id: UUID,
     body: WorkflowUpdate,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Workflow:
-    """Update an existing workflow."""
+    """Update an existing workflow (must belong to current user)."""
     workflow = session.get(Workflow, workflow_id)
-    if workflow is None:
+    if workflow is None or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     if body.name is not None:
@@ -179,6 +191,7 @@ async def publish_workflow(
     workflow_id: UUID,
     body: WorkflowPublish,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Workflow:
     """Publish a workflow — sets is_active=True and assigns a phone number.
 
@@ -188,7 +201,7 @@ async def publish_workflow(
     Deactivates any other workflow currently active on the same phone number.
     """
     workflow = session.get(Workflow, workflow_id)
-    if workflow is None:
+    if workflow is None or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     # Optimistic concurrency check
@@ -200,7 +213,7 @@ async def publish_workflow(
 
     # Resolve phone number
     phone = session.get(PhoneNumber, body.phone_number_id)
-    if phone is None:
+    if phone is None or phone.user_id != user.id:
         raise HTTPException(status_code=404, detail="Phone number not found")
 
     # Check if the number is assigned to a different active workflow
@@ -257,10 +270,11 @@ async def publish_workflow(
 async def delete_workflow(
     workflow_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> None:
-    """Hard-delete a workflow."""
+    """Hard-delete a workflow (must belong to current user)."""
     workflow = session.get(Workflow, workflow_id)
-    if workflow is None:
+    if workflow is None or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
     session.delete(workflow)
     session.commit()

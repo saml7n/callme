@@ -5,7 +5,9 @@ description = "CallMe AI Receptionist — server"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bcrypt>=4.3.0",
     "cryptography>=46.0.5",
+    "email-validator>=2.0.0",
     "fastapi>=0.129.0",
     "google-api-python-client>=2.190.0",
     "google-auth>=2.48.0",
@@ -15,6 +17,7 @@ dependencies = [
     "openai>=2.21.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
+    "PyJWT>=2.10.0",
     "python-multipart>=0.0.22",
     "sqlmodel>=0.0.34",
     "twilio>=9.10.2",

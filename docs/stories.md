@@ -1220,16 +1220,16 @@ This requires replacing the single API key auth with proper user accounts (email
 
 ### Acceptance criteria
 
-- [ ] **Registration endpoint.** `POST /api/auth/register` accepts `{ email, password, name }` and creates a user account. Passwords are hashed with bcrypt. Returns a JWT token.
-- [ ] **Login endpoint.** `POST /api/auth/login` accepts `{ email, password }` (in addition to the existing API key flow for backwards compat). Returns a JWT token with `user_id` claim and configurable expiry (default 7 days).
-- [ ] **JWT auth middleware.** All protected endpoints accept `Authorization: Bearer <jwt>`. The existing API key auth continues to work as a "superuser/admin" bypass.
-- [ ] **User model.** New `User` table: `id`, `email` (unique), `password_hash`, `name`, `created_at`.
-- [ ] **Tenant isolation.** `Workflow`, `Call`, `PhoneNumber`, `Integration`, and `Setting` models gain a `user_id` foreign key. All CRUD queries filter by the authenticated user's ID.
-- [ ] **Migration of existing data.** On first startup after upgrade, if existing rows have no `user_id`, they are assigned to a default "admin" user (auto-created from `CALLME_API_KEY` if set).
-- [ ] **Registration page.** New `/register` page with email, password, name fields and a "Sign up" button. Link to `/login` for existing users.
-- [ ] **Login page updated.** Add email + password fields alongside (or replacing) the API key field. Link to `/register` for new users.
-- [ ] **Token storage.** JWT stored in `localStorage` (replacing the raw API key). Auto-refresh or re-login on expiry.
-- [ ] **User menu.** AppShell shows the logged-in user's name/email and a "Sign Out" button.
+- [x] **Registration endpoint.** `POST /api/auth/register` accepts `{ email, password, name }` and creates a user account. Passwords are hashed with bcrypt. Returns a JWT token.
+- [x] **Login endpoint.** `POST /api/auth/login` accepts `{ email, password }` (in addition to the existing API key flow for backwards compat). Returns a JWT token with `user_id` claim and configurable expiry (default 7 days).
+- [x] **JWT auth middleware.** All protected endpoints accept `Authorization: Bearer <jwt>`. The existing API key auth continues to work as a "superuser/admin" bypass.
+- [x] **User model.** New `User` table: `id`, `email` (unique), `password_hash`, `name`, `created_at`.
+- [x] **Tenant isolation.** `Workflow`, `Call`, `PhoneNumber`, `Integration`, and `Setting` models gain a `user_id` foreign key. All CRUD queries filter by the authenticated user's ID.
+- [x] **Migration of existing data.** On first startup after upgrade, if existing rows have no `user_id`, they are assigned to a default "admin" user (auto-created from `CALLME_API_KEY` if set).
+- [x] **Registration page.** New `/register` page with email, password, name fields and a "Sign up" button. Link to `/login` for existing users.
+- [x] **Login page updated.** Add email + password fields alongside (or replacing) the API key field. Link to `/register` for new users.
+- [x] **Token storage.** JWT stored in `localStorage` (replacing the raw API key). Auto-refresh or re-login on expiry.
+- [x] **User menu.** AppShell shows the logged-in user's name/email and a "Sign Out" button.
 
 ### Technical notes
 

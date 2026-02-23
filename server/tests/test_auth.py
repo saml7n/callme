@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.auth import get_api_key, init_api_key, require_auth
+from app.auth import get_api_key, get_current_user, init_api_key, require_auth
 from app.main import app
 
 
@@ -18,8 +18,9 @@ TEST_KEY = "test-secret-key-12345"
 
 @pytest.fixture(autouse=True)
 def _set_api_key(monkeypatch):
-    """Set a known API key for all auth tests."""
+    """Set a known API key and JWT secret for all auth tests."""
     monkeypatch.setattr("app.auth._api_key", TEST_KEY)
+    monkeypatch.setattr("app.auth.JWT_SECRET_KEY", TEST_KEY)
     monkeypatch.setattr("app.auth.settings.callme_api_key", TEST_KEY)
 
 
@@ -47,23 +48,26 @@ def authed_client():
 
 
 class TestLogin:
-    async def test_login_valid_key(self, client):
+    async def test_login_valid_key(self, client, db_session):
         async with client:
             resp = await client.post("/api/auth/login", json={"key": TEST_KEY})
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
-        assert body["token"] == TEST_KEY
+        # Now returns a JWT rather than the raw key
+        assert body["token"] is not None
+        assert body["user"]["email"] == "admin@local"
 
-    async def test_login_invalid_key(self, client):
+    async def test_login_invalid_key(self, client, db_session):
         async with client:
             resp = await client.post("/api/auth/login", json={"key": "wrong-key"})
         assert resp.status_code == 401
 
-    async def test_login_empty_key(self, client):
+    async def test_login_empty_key(self, client, db_session):
         async with client:
             resp = await client.post("/api/auth/login", json={"key": ""})
-        assert resp.status_code == 401
+        # Empty key falls through to email+password path → 422
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -88,36 +92,47 @@ class TestCheck:
 class TestRequireAuth:
     async def test_missing_token_returns_401(self, client, db_session):
         """No Authorization header → 401."""
-        # Ensure auth dependency is NOT overridden for these tests
+        # Ensure auth dependencies are NOT overridden for these tests
         app.dependency_overrides.pop(require_auth, None)
+        app.dependency_overrides.pop(get_current_user, None)
         try:
             async with client:
                 resp = await client.get("/api/workflows")
             assert resp.status_code == 401
         finally:
-            # Restore override so other tests work
+            # Restore overrides so other tests work
             async def _no_auth() -> str:
                 return TEST_KEY
+            from tests.conftest import TEST_USER
+            async def _test_user():
+                return TEST_USER
             app.dependency_overrides[require_auth] = _no_auth
+            app.dependency_overrides[get_current_user] = _test_user
 
-    async def test_invalid_token_returns_403(self, client, db_session):
-        """Wrong Bearer token → 403."""
+    async def test_invalid_token_returns_401(self, client, db_session):
+        """Wrong Bearer token → 401."""
         app.dependency_overrides.pop(require_auth, None)
+        app.dependency_overrides.pop(get_current_user, None)
         try:
             async with client:
                 resp = await client.get(
                     "/api/workflows",
                     headers={"Authorization": "Bearer wrong-token"},
                 )
-            assert resp.status_code == 403
+            assert resp.status_code == 401
         finally:
             async def _no_auth() -> str:
                 return TEST_KEY
+            from tests.conftest import TEST_USER
+            async def _test_user():
+                return TEST_USER
             app.dependency_overrides[require_auth] = _no_auth
+            app.dependency_overrides[get_current_user] = _test_user
 
     async def test_valid_token_returns_200(self, authed_client, db_session):
         """Correct Bearer token → 200."""
         app.dependency_overrides.pop(require_auth, None)
+        app.dependency_overrides.pop(get_current_user, None)
         try:
             async with authed_client:
                 resp = await authed_client.get("/api/workflows")
@@ -125,7 +140,11 @@ class TestRequireAuth:
         finally:
             async def _no_auth() -> str:
                 return TEST_KEY
+            from tests.conftest import TEST_USER
+            async def _test_user():
+                return TEST_USER
             app.dependency_overrides[require_auth] = _no_auth
+            app.dependency_overrides[get_current_user] = _test_user
 
 
 # ---------------------------------------------------------------------------

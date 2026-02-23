@@ -14,8 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.auth import require_auth
-from app.db.models import Call, CallEvent, Workflow
+from app.auth import get_current_user, require_auth
+from app.db.models import Call, CallEvent, User, Workflow
 from app.db.session import get_session
 from app.events import event_bus
 
@@ -104,11 +104,13 @@ async def list_calls(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """List recent calls, most recent first."""
+    """List recent calls for the current user, most recent first."""
     calls = list(
         session.exec(
             select(Call)
+            .where(Call.user_id == user.id)
             .order_by(Call.started_at.desc())
             .offset(offset)
             .limit(limit)
@@ -153,10 +155,11 @@ async def get_active_call_count() -> dict[str, int]:
 async def get_call(
     call_id: UUID,
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get a single call with all its events."""
+    """Get a single call with all its events (must belong to current user)."""
     call = session.get(Call, call_id)
-    if call is None:
+    if call is None or call.user_id != user.id:
         raise HTTPException(status_code=404, detail="Call not found")
 
     events = list(session.exec(
