@@ -157,3 +157,42 @@ export interface TemplateItem {
   icon: string
   graph: WorkflowGraph
 }
+
+// ---------------------------------------------------------------------------
+// Live call types (Story 18)
+// ---------------------------------------------------------------------------
+
+export interface LiveCallEvent {
+  type: 'call_started' | 'transcript' | 'node_transition' | 'call_ended' | 'transfer_started' | 'snapshot'
+  call_id?: string
+  caller_number?: string
+  workflow_name?: string
+  role?: 'caller' | 'ai'
+  text?: string
+  from_node?: string
+  to_node?: string
+  duration?: number
+  target_number?: string
+  timestamp?: number
+  calls?: ActiveCall[]
+}
+
+export interface ActiveCall {
+  call_id: string
+  call_sid: string
+  caller_number: string
+  workflow_name: string
+  started_at: number
+}
+
+export interface TranscriptMessage {
+  role: 'caller' | 'ai'
+  text: string
+  timestamp: number
+}
+
+export interface TransferResult {
+  ok: boolean
+  call_id: string
+  transferred_to: string
+}

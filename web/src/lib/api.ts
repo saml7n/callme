@@ -9,6 +9,7 @@ import type {
   PhoneNumberItem,
   SettingsResponse,
   TemplateItem,
+  TransferResult,
   ValidateResults,
   WorkflowDetail,
   WorkflowGraph,
@@ -102,6 +103,11 @@ export const api = {
       request<CallListItem[]>(`/api/calls?limit=${limit}&offset=${offset}`),
 
     get: (id: string) => request<CallDetail>(`/api/calls/${id}`),
+
+    live: () => request<Record<string, unknown>[]>('/api/calls/live'),
+
+    transfer: (id: string) =>
+      request<TransferResult>(`/api/calls/${id}/transfer`, { method: 'POST' }),
   },
 
   phoneNumbers: {

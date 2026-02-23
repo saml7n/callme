@@ -13,6 +13,7 @@ import CallDetail from './pages/CallDetail'
 import PhoneNumbers from './pages/PhoneNumbers'
 import Integrations from './pages/Integrations'
 import Setup from './pages/Setup'
+import LiveCalls from './pages/LiveCalls'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/workflows/new" element={<AuthGuard><WorkflowBuilder /></AuthGuard>} />
         <Route path="/workflows/:id/edit" element={<AuthGuard><WorkflowBuilder /></AuthGuard>} />
         <Route path="/workflows/preview" element={<AuthGuard><WorkflowPreview /></AuthGuard>} />
+        <Route path="/calls/live" element={<AuthGuard><LiveCalls /></AuthGuard>} />
         <Route path="/calls" element={<AuthGuard><CallList /></AuthGuard>} />
         <Route path="/calls/:id" element={<AuthGuard><CallDetail /></AuthGuard>} />
         <Route path="/settings/phone-numbers" element={<AuthGuard><PhoneNumbers /></AuthGuard>} />

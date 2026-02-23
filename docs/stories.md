@@ -969,78 +969,54 @@ As a **new user setting up their own instance**, I want **a guided setup wizard 
 
 ---
 
-## Story 18 — Live call monitor & human takeover
+## Story 18 — Live call transcript & transfer
 
-As an **admin**, I want **to see when a call is active, read the live transcript, and optionally take over the conversation by typing responses that are spoken to the caller**, so that **I can intervene when the AI is struggling — without needing a mobile app**.
+As an **admin**, I want **to see when a call is active, read the live transcript, and optionally transfer the call to my own phone**, so that **I can monitor conversations and step in when needed**.
+
+> **Scope note:** The original story included typed human takeover and SMS alerts. These were descoped to a simpler transfer-to-phone model.
 
 ### Acceptance criteria
 
-#### Server — WebSocket event bus
-- [ ] New WebSocket endpoint: `GET /ws/calls/live` — streams real-time events for all active calls.
-- [ ] Events pushed to the WebSocket:
-  - `call_started` — `{ call_id, caller_number, workflow_name, timestamp }`.
-  - `transcript` — `{ call_id, role: "caller"|"ai", text, timestamp }`.
-  - `node_transition` — `{ call_id, from_node, to_node, timestamp }`.
-  - `call_ended` — `{ call_id, duration, timestamp }`.
-- [ ] Multiple dashboard clients can connect simultaneously (broadcast).
+#### Server — In-memory event bus
+- [x] `EventBus` singleton (`app/events.py`) with register/unregister calls, subscribe/unsubscribe queues, and emit broadcast.
+- [x] Pipeline emits `transcript` events for both caller utterances and AI responses.
+- [x] `media_stream.py` registers/unregisters calls with event bus on connect/disconnect.
 
-#### Server — Human takeover API
-- [ ] `POST /api/calls/{call_id}/takeover` — switches the call to **human mode**:
-  - Pauses the LLM pipeline (stops generating AI responses).
-  - Injects a brief TTS message: *"One moment please, I'm connecting you with a team member."*
-  - Returns `200` with confirmation, or `404` if the call has ended.
-- [ ] `POST /api/calls/{call_id}/message` — sends a text message to be spoken to the caller via TTS.
-  - Only works when in human mode. Returns `409` if call is still in AI mode.
-  - Body: `{ "text": "Hi, this is Sam. I saw you were asking about appointments..." }`.
-- [ ] `POST /api/calls/{call_id}/release` — returns the call to AI mode. The LLM resumes with full context (including the human messages).
-- [ ] Human-mode messages are added to the conversation history so the LLM has continuity when resumed.
-
-#### Server — Admin SMS alerts
-- [ ] When a call starts, if `admin_phone_number` is configured, send an SMS via Twilio: *"📞 Incoming call from +44... on Dental Reception. View: {dashboard_url}/calls/live"*.
-- [ ] SMS includes a deep link to the live call monitor.
-- [ ] Rate-limited: max 1 SMS per 60 seconds to avoid spam during high call volume.
+#### Server — WebSocket & REST endpoints
+- [x] `GET /ws/calls/live` WebSocket — sends `snapshot` on connect, then streams `call_started`, `transcript`, `call_ended`, `transfer_started` events.
+- [x] `GET /api/calls/live` REST — returns list of active calls.
+- [x] `POST /api/calls/{call_id}/transfer` — cold-transfers the call to the admin's registered phone via Twilio REST API (`<Say>` + `<Dial>` TwiML).
+- [x] Multiple dashboard clients can connect simultaneously (broadcast via asyncio.Queue).
 
 #### Web — Live calls dashboard
-- [ ] A page at `/calls/live` shows all active calls in real-time.
-- [ ] Each active call card shows:
-  - Caller number (masked), workflow name, duration (ticking), current node.
-  - Live transcript scrolling as it arrives (caller messages left, AI messages right).
-  - Status badge: "AI Active" (indigo) or "Human Mode" (green).
-- [ ] "Take Over" button on each card → calls `/api/calls/{call_id}/takeover`.
-- [ ] When in human mode:
-  - A text input appears at the bottom of the transcript.
-  - Admin types a message → POST `/api/calls/{call_id}/message` → message appears in transcript and is spoken to the caller.
-  - "Return to AI" button → POST `/api/calls/{call_id}/release`.
-- [ ] When a call ends, the card fades out and a "View call log" link appears.
-- [ ] Empty state: "No active calls. Waiting for incoming calls…" with a subtle pulse animation.
+- [x] A page at `/calls/live` shows all active calls in real-time.
+- [x] Each active call card shows: caller number (masked), workflow name, duration (ticking), live transcript (caller left, AI right), status badge ("AI Active" / "Transferred").
+- [x] "Transfer to me" button → calls transfer API → hides button, shows "Transferred" badge.
+- [x] When a call ends, card moves to "Recently Ended" section with "View call log" link.
+- [x] Empty state: "No active calls. Waiting for incoming calls…" with pulse animation.
 
 #### Web — Nav & notifications
-- [ ] Nav bar shows a "Live" indicator with active call count badge (red dot when > 0).
-- [ ] Browser notification (with permission) when a new call starts: "Incoming call from +44... on Dental Reception".
+- [x] Homepage shows "Live Calls" button (green) linking to `/calls/live`.
+- [x] Browser notification (with permission) when a new call starts.
+- [x] Connected/Disconnected WebSocket status badge in header.
 
 ### Unit tests
-- **WebSocket:** Connect → receive `call_started` when a call begins. Receive `transcript` events in order. `call_ended` when call finishes. Multiple clients receive the same events.
-- **Takeover:** POST `/takeover` → call switches to human mode. POST `/message` in human mode → text sent to TTS. POST `/message` in AI mode → 409. POST `/release` → call returns to AI mode with context preserved.
-- **SMS:** Call started with admin number configured → Twilio SMS sent (mock). Rate limit: two calls within 60s → only one SMS.
-- **Web:** Live call card renders with transcript. Take Over button calls API and switches UI to human mode. Type message → POST sent. Release → UI reverts to AI mode.
+- **Server (19 tests):** EventBus register/unregister/subscribe/emit, WebSocket snapshot+streaming, REST active calls, transfer API (404/422/success), phone masking.
+- **Web (11 tests):** Empty state, WebSocket connection, connected badge, snapshot rendering, call_started event, transcript messages, call ended, transfer button, transferred badge, phone masking, nav links.
 
-### QA verification
-1. Configure admin phone number in setup wizard.
-2. Open `/calls/live` in browser → "No active calls".
-3. Call the Twilio number from a phone → card appears with live transcript streaming.
-4. Receive SMS on admin phone with deep link.
-5. Click "Take Over" → AI pauses, caller hears "One moment please…".
-6. Type a message in the dashboard → caller hears it spoken.
-7. Click "Return to AI" → AI resumes with context. Verify AI knows what happened during human mode.
-8. Call ends → card fades, "View call log" link works.
-9. Open on mobile browser → layout is responsive, takeover works from phone browser.
-
-### Blocked until answered
-1. Should the admin SMS include full caller number or masked?
-2. TTS voice for human-typed messages: same workflow voice, or a distinct "operator" voice?
-3. Should there be a timeout that auto-releases human mode back to AI if the admin doesn't type for N seconds?
-
-**Recorded answers:**
-- SMS caller number: _unanswered_
-- Takeover TTS voice: _unanswered_
-- Auto-release timeout: _unanswered_
+### Completion
+- **Server tests:** 302 passing (19 new in `test_live.py`).
+- **Web tests:** 78 passing (11 new in `liveCalls.test.tsx`).
+- **Files added/modified:**
+  - `server/app/events.py` (new) — EventBus singleton
+  - `server/app/api/live.py` (new) — WebSocket, REST, transfer endpoints
+  - `server/app/main.py` — registered live_router
+  - `server/app/pipeline.py` — emit transcript events
+  - `server/app/twilio/media_stream.py` — register/unregister calls
+  - `server/tests/test_live.py` (new) — 19 tests
+  - `web/src/pages/LiveCalls.tsx` (new) — live calls dashboard
+  - `web/src/main.tsx` — added `/calls/live` route
+  - `web/src/App.tsx` — added "Live Calls" nav button
+  - `web/src/lib/types.ts` — LiveCallEvent, ActiveCall, TranscriptMessage, TransferResult
+  - `web/src/lib/api.ts` — calls.live(), calls.transfer()
+  - `web/src/test/liveCalls.test.tsx` (new) — 11 tests

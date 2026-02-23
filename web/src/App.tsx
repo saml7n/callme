@@ -61,6 +61,12 @@ function App() {
             Workflows
           </Link>
           <Link
+            to="/calls/live"
+            className="px-5 py-2.5 bg-green-800 text-green-200 rounded-lg hover:bg-green-700 transition font-medium"
+          >
+            Live Calls
+          </Link>
+          <Link
             to="/calls"
             className="px-5 py-2.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition font-medium"
           >

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
 from app.api.calls import router as calls_router
 from app.api.integrations import router as integrations_router
+from app.api.live import router as live_router
 from app.api.phone_numbers import router as phone_numbers_router
 from app.api.settings import router as settings_router
 from app.api.templates import router as templates_router
@@ -71,6 +72,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(media_stream_router)
+app.include_router(live_router)
 app.include_router(workflows_router)
 app.include_router(phone_numbers_router)
 app.include_router(calls_router)

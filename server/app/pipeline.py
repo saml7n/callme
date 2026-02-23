@@ -19,6 +19,7 @@ from app.llm.openai import LLMClient
 from app.stt.deepgram import DeepgramConnectionError, DeepgramSTTClient
 from app.tts.elevenlabs import ElevenLabsTTSClient
 from app.db.call_logger import CallLogger
+from app.events import event_bus
 from app.workflow.engine import ActionResult, WorkflowEngine
 
 logger = logging.getLogger(__name__)
@@ -151,10 +152,12 @@ class CallPipeline:
         workflow: dict[str, Any] | None = None,
         engine: WorkflowEngine | None = None,
         call_logger: CallLogger | None = None,
+        call_id: str = "",
     ) -> None:
         self._ws = ws
         self._stream_sid = stream_sid
         self._call_sid = call_sid
+        self._call_id = call_id
         self._stt = stt or DeepgramSTTClient()
         self._llm = llm or LLMClient()
         self._tts = tts or ElevenLabsTTSClient()
@@ -192,6 +195,22 @@ class CallPipeline:
     def messages(self) -> list[dict[str, str]]:
         """Current conversation history (read-only snapshot)."""
         return list(self._messages)
+
+    # ------------------------------------------------------------------
+    # Live event emission
+    # ------------------------------------------------------------------
+
+    def _emit(self, event_type: str, **kwargs: Any) -> None:
+        """Emit a live event to the dashboard via the event bus."""
+        if not self._call_id:
+            return
+        import time
+        event_bus.emit({
+            "type": event_type,
+            "call_id": self._call_id,
+            "timestamp": time.time(),
+            **kwargs,
+        })
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -400,6 +419,7 @@ class CallPipeline:
     async def _handle_caller_utterance(self, transcript: str) -> None:
         """Process a complete caller utterance through LLM/engine."""
         self._messages.append({"role": "user", "content": transcript})
+        self._emit("transcript", role="caller", text=transcript)
         if self._call_logger:
             self._call_logger.log_transcript(transcript)
             self._call_logger.flush()
@@ -484,6 +504,7 @@ class CallPipeline:
             # Add the complete response to conversation history
             if full_response.strip():
                 self._messages.append({"role": "assistant", "content": full_response.strip()})
+                self._emit("transcript", role="ai", text=full_response.strip())
                 logger.info("Assistant: %s", full_response.strip())
                 if self._call_logger:
                     self._call_logger.log_llm_response(full_response.strip())
@@ -595,6 +616,7 @@ class CallPipeline:
             # Add the complete response to conversation history
             if full_response.strip():
                 self._messages.append({"role": "assistant", "content": full_response.strip()})
+                self._emit("transcript", role="ai", text=full_response.strip())
                 logger.info("Engine assistant: %s", full_response.strip())
                 if self._call_logger:
                     self._call_logger.log_llm_response(full_response.strip())

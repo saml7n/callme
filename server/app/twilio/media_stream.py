@@ -26,6 +26,7 @@ from sqlmodel import Session, select
 from app.db.call_logger import CallLogger
 from app.db.models import Call, Workflow as WorkflowModel
 from app.db.session import get_session
+from app.events import event_bus
 from app.pipeline import CallPipeline
 
 logger = logging.getLogger(__name__)
@@ -98,10 +99,10 @@ def build_mark_message(stream_sid: str, name: str) -> str:
     return json.dumps({"event": "mark", "streamSid": stream_sid, "mark": {"name": name}})
 
 
-def _load_active_workflow() -> tuple[dict[str, Any] | None, Any]:
+def _load_active_workflow() -> tuple[dict[str, Any] | None, Any, str]:
     """Load the active workflow from the DB, with fallback to disk.
 
-    Returns (workflow_dict, workflow_db_id).
+    Returns (workflow_dict, workflow_db_id, workflow_name).
     """
     try:
         session = next(get_session())
@@ -110,14 +111,14 @@ def _load_active_workflow() -> tuple[dict[str, Any] | None, Any]:
         ).first()
         if db_wf is not None:
             logger.info("Loaded active workflow from DB: %s (id=%s)", db_wf.name, db_wf.id)
-            return db_wf.graph_json, db_wf.id
+            return db_wf.graph_json, db_wf.id, db_wf.name
     except Exception:
         logger.exception("Failed to load workflow from DB")
 
     if _FALLBACK_WORKFLOW is not None:
         logger.info("Using fallback workflow from disk")
-        return _FALLBACK_WORKFLOW, None
-    return None, None
+        return _FALLBACK_WORKFLOW, None, "Fallback"
+    return None, None, ""
 
 
 def _create_call_record(
@@ -151,6 +152,7 @@ async def media_stream(ws: WebSocket) -> None:
     await ws.accept()
     state = MediaStreamState()
     pipeline: CallPipeline | None = None
+    call_id_str: str = ""
 
     try:
         while True:
@@ -173,7 +175,7 @@ async def media_stream(ws: WebSocket) -> None:
                 # Start the full voice pipeline
                 try:
                     # Load active workflow from DB (falls back to disk)
-                    workflow_dict, workflow_db_id = _load_active_workflow()
+                    workflow_dict, workflow_db_id, workflow_name = _load_active_workflow()
 
                     # Create a call record in the database
                     call_record = _create_call_record(
@@ -183,6 +185,16 @@ async def media_stream(ws: WebSocket) -> None:
                         workflow_id=workflow_db_id,
                     )
                     call_logger = CallLogger(call_record.id) if call_record else None
+                    call_id_str = str(call_record.id) if call_record else ""
+
+                    # Register call with event bus for live dashboard
+                    if call_id_str:
+                        event_bus.register_call(
+                            call_id=call_id_str,
+                            call_sid=state.call_sid,
+                            caller_number="",
+                            workflow_name=workflow_name,
+                        )
 
                     pipeline = CallPipeline(
                         ws=ws,
@@ -190,6 +202,7 @@ async def media_stream(ws: WebSocket) -> None:
                         call_sid=state.call_sid,
                         workflow=workflow_dict,
                         call_logger=call_logger,
+                        call_id=call_id_str,
                     )
                     await pipeline.start()
                     logger.info("CallPipeline started for call %s (workflow=%s)", state.call_sid, "yes" if workflow_dict else "no")
@@ -233,6 +246,9 @@ async def media_stream(ws: WebSocket) -> None:
             state.chunks_received,
         )
     finally:
+        # Unregister call from event bus
+        if call_id_str:
+            event_bus.unregister_call(call_id_str)
         # Clean up pipeline
         if pipeline is not None:
             await pipeline.close()
