@@ -329,7 +329,7 @@ export default function Integrations() {
                       <p className="text-sm font-medium text-white truncate">{item.name}</p>
                       <p className="text-xs text-gray-500">
                         {INTEGRATION_TYPE_LABELS[item.type]}
-                        {isGoogleCalendar(item) && item.config_redacted?.calendar_id && (
+                        {isGoogleCalendar(item) && !!item.config_redacted?.calendar_id && (
                           <span className="ml-2 text-gray-400">
                             · Calendar: {String(item.config_redacted.calendar_id)}
                           </span>

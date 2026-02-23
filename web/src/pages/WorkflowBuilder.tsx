@@ -196,10 +196,9 @@ function workflowGraphToFlow(
 export default function WorkflowBuilder() {
   const { id: workflowId } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const isNew = !workflowId
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[])
   const [entryNodeId, setEntryNodeId] = useState('')
   const [workflowName, setWorkflowName] = useState('Untitled Workflow')
   const [version, setVersion] = useState(1)

@@ -78,8 +78,8 @@ function workflowToFlow(wf: WorkflowData): { nodes: Node[]; edges: Edge[] } {
 }
 
 export default function WorkflowPreview() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[])
   const [workflow, setWorkflow] = useState<WorkflowData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)

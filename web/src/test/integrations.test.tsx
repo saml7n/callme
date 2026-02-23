@@ -1,7 +1,7 @@
 /** Unit tests for integration picker (ConfigPanel), ActionNode, Integrations page. */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
@@ -188,6 +188,7 @@ describe('ActionNode – integration rendering', () => {
     isConnectable: true,
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
+    draggable: true,
     dragging: false,
     deletable: true,
     selectable: true,

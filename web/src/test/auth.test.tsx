@@ -93,7 +93,7 @@ function renderProtected(initialEntries = ['/']) {
 describe('Login', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(clearToken as ReturnType<typeof vi.fn>)()
+    vi.mocked(clearToken)()
   })
 
   it('renders the email + password login form by default', () => {
@@ -179,7 +179,7 @@ describe('Login', () => {
 describe('Register', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(clearToken as ReturnType<typeof vi.fn>)()
+    vi.mocked(clearToken)()
   })
 
   it('renders the registration form', () => {
@@ -239,7 +239,7 @@ describe('Register', () => {
 describe('AuthGuard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(clearToken as ReturnType<typeof vi.fn>)()
+    vi.mocked(clearToken)()
   })
 
   it('redirects to /login when not authenticated', () => {

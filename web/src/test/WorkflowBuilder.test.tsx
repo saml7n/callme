@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ReactFlowProvider } from '@xyflow/react'
@@ -75,6 +75,7 @@ describe('ConversationNode', () => {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
         zIndex={0}
+        draggable={true}
         dragging={false}
         deletable={true}
         selectable={true}
@@ -107,6 +108,7 @@ describe('ConversationNode', () => {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
         zIndex={0}
+        draggable={true}
         dragging={false}
         deletable={true}
         selectable={true}
@@ -142,6 +144,7 @@ describe('DecisionNode', () => {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
         zIndex={0}
+        draggable={true}
         dragging={false}
         deletable={true}
         selectable={true}
@@ -180,6 +183,7 @@ describe('ActionNode', () => {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
         zIndex={0}
+        draggable={true}
         dragging={false}
         deletable={true}
         selectable={true}
@@ -218,6 +222,7 @@ describe('ActionNode', () => {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
         zIndex={0}
+        draggable={true}
         dragging={false}
         deletable={true}
         selectable={true}

@@ -88,7 +88,7 @@ export default function LiveCalls() {
         case 'snapshot': {
           // Initial state — hydrate active calls with their transcripts
           for (const c of event.calls ?? []) {
-            const existingTranscript = (c as Record<string, unknown>).transcript as
+            const existingTranscript = (c as unknown as Record<string, unknown>).transcript as
               | { role: string; text: string; timestamp: number }[]
               | undefined
             next[c.call_id] = {
