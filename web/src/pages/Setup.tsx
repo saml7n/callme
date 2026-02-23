@@ -254,7 +254,7 @@ export default function Setup() {
         {/* Step 1: Welcome */}
         {step === 0 && (
           <div className="text-center space-y-6" data-testid="step-welcome">
-            <h1 className="text-3xl font-bold">Welcome to CallMe!</h1>
+            <h1 className="text-3xl font-bold">Welcome to Pronto!</h1>
             <p className="text-lg text-gray-400">
               Let's get your AI receptionist running. This wizard will walk you through:
             </p>

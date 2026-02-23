@@ -46,7 +46,7 @@ export default function WorkflowList() {
       <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            CallMe
+            Pronto
           </Link>
           <span className="text-gray-600">›</span>
           <span className="text-gray-300">Workflows</span>

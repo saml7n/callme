@@ -80,7 +80,7 @@ beforeEach(() => {
 describe('Welcome step', () => {
   it('renders welcome heading and overview items', async () => {
     renderSetup()
-    expect(screen.getByText('Welcome to CallMe!')).toBeInTheDocument()
+    expect(screen.getByText('Welcome to Pronto!')).toBeInTheDocument()
     // These texts appear in both progress bar and welcome overview, so use getAllByText
     expect(screen.getAllByText('API Keys').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Phone Number').length).toBeGreaterThanOrEqual(1)
@@ -337,6 +337,6 @@ describe('Auto-redirect', () => {
     // Just verify the auto-redirect logic exists by checking the Setup page renders
     // Full integration test would need the App + AuthGuard wired up
     renderSetup()
-    expect(screen.getByText('Welcome to CallMe!')).toBeInTheDocument()
+    expect(screen.getByText('Welcome to Pronto!')).toBeInTheDocument()
   })
 })

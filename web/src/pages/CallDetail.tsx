@@ -154,7 +154,7 @@ export default function CallDetail() {
     <div className="min-h-screen bg-gray-950">
       <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center gap-4">
         <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-          CallMe
+          Pronto
         </Link>
         <span className="text-gray-600">›</span>
         <Link to="/calls" className="text-gray-400 hover:text-gray-200 transition">

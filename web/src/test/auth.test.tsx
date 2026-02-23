@@ -80,7 +80,7 @@ describe('Login', () => {
 
   it('renders the login form', () => {
     renderLogin()
-    expect(screen.getByText('CallMe')).toBeInTheDocument()
+    expect(screen.getByText('Pronto')).toBeInTheDocument()
     expect(screen.getByLabelText('API Key')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
   })

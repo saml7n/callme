@@ -455,7 +455,7 @@ export default function WorkflowBuilder() {
       <header className="bg-gray-900 border-b border-gray-800 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            CallMe
+            Pronto
           </Link>
           <span className="text-gray-600">›</span>
           <Input

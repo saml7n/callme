@@ -33,7 +33,7 @@ export default function Login() {
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-white font-bold text-2xl mb-2">CallMe</h1>
+          <h1 className="text-white font-bold text-2xl mb-2">Pronto</h1>
           <p className="text-gray-500 text-sm">Enter your API key to continue</p>
         </div>
 

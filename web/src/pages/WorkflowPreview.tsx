@@ -138,7 +138,7 @@ export default function WorkflowPreview() {
       {/* Header */}
       <header className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <h1 className="text-white font-bold text-lg">CallMe</h1>
+          <h1 className="text-white font-bold text-lg">Pronto</h1>
           <span className="text-gray-500">›</span>
           <span className="text-gray-300">{workflow?.name ?? 'Workflow'}</span>
           <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">
