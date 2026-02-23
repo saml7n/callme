@@ -1,6 +1,6 @@
 # CallMe — AI Receptionist: Architecture & Plan
 
-> **Status:** Planning / Pre-implementation  
+> **Status:** Active development (Stories 0–23 complete)  
 > **Last updated:** 20 February 2026  
 > **Approach:** Option B — Hybrid (own orchestration + best-in-class services)
 
