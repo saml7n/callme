@@ -60,17 +60,6 @@ async def live_events_ws(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# REST — active calls snapshot
-# ---------------------------------------------------------------------------
-
-
-@router.get("/api/calls/live", dependencies=[Depends(require_auth)])
-async def get_active_calls() -> list[dict]:
-    """Return currently active calls (REST alternative to WebSocket)."""
-    return event_bus.get_active_calls()
-
-
-# ---------------------------------------------------------------------------
 # Transfer
 # ---------------------------------------------------------------------------
 

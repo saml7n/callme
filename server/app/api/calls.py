@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from app.auth import require_auth
 from app.db.models import Call, CallEvent, Workflow
 from app.db.session import get_session
+from app.events import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,12 @@ async def list_calls(
             "status": _call_status(call, events),
         })
     return results
+
+
+@router.get("/live")
+async def get_active_calls() -> list[dict]:
+    """Return currently active calls (real-time, from event bus)."""
+    return event_bus.get_active_calls()
 
 
 @router.get("/{call_id}", response_model=CallDetail)
