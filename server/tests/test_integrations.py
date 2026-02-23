@@ -447,3 +447,232 @@ class TestEncryptionAtRest:
 
         decrypted = json.loads(decrypt(raw))
         assert decrypted == sample_webhook_config
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth status endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestGoogleOAuthStatus:
+    @pytest.mark.anyio
+    async def test_status_not_configured(self, db_session, monkeypatch):
+        """Returns configured: false when env vars are not set."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/integrations/google/status")
+            assert resp.status_code == 200
+            assert resp.json() == {"configured": False}
+
+    @pytest.mark.anyio
+    async def test_status_configured(self, db_session, monkeypatch):
+        """Returns configured: true when both env vars are set."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "test-client-id")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "test-secret")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/integrations/google/status")
+            assert resp.status_code == 200
+            assert resp.json() == {"configured": True}
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth connect endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestGoogleOAuthConnect:
+    @pytest.mark.anyio
+    async def test_connect_returns_url(self, db_session, monkeypatch):
+        """Returns a valid Google OAuth consent URL."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "test-client-id.apps.googleusercontent.com")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "test-secret")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/integrations/google/connect")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "url" in data
+            assert "accounts.google.com" in data["url"]
+            assert "test-client-id" in data["url"]
+            assert "state=" in data["url"]
+
+    @pytest.mark.anyio
+    async def test_connect_not_configured(self, db_session, monkeypatch):
+        """Returns 422 when env vars are not set."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/integrations/google/connect")
+            assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth callback (one-click flow)
+# ---------------------------------------------------------------------------
+
+
+class TestGoogleOAuthCallback:
+    @pytest.mark.anyio
+    async def test_callback_invalid_state(self, db_session, monkeypatch):
+        """Rejects callback with invalid/expired state token."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "test-id")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "test-secret")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            follow_redirects=False,
+        ) as client:
+            resp = await client.get(
+                "/api/integrations/google/callback",
+                params={"code": "auth-code", "state": "invalid-state"},
+            )
+            assert resp.status_code == 400
+
+    @pytest.mark.anyio
+    async def test_callback_creates_integration(self, db_session, monkeypatch):
+        """Successful callback creates a new integration and redirects."""
+        from app import config as config_mod
+        from app.api import integrations as int_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "test-id")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "test-secret")
+
+        # Insert a valid state token
+        import time
+        int_mod._oauth_states["test-state"] = time.time()
+
+        # Mock the token exchange
+        import httpx as _httpx
+
+        class MockResponse:
+            status_code = 200
+            text = ""
+            def json(self):
+                return {
+                    "refresh_token": "mock-refresh-token",
+                    "access_token": "mock-access-token",
+                }
+
+        class MockAsyncClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+            async def post(self, *args, **kwargs):
+                return MockResponse()
+
+        monkeypatch.setattr(_httpx, "AsyncClient", lambda **kwargs: MockAsyncClient())
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            follow_redirects=False,
+        ) as client:
+            resp = await client.get(
+                "/api/integrations/google/callback",
+                params={"code": "auth-code", "state": "test-state"},
+            )
+            # Should redirect
+            assert resp.status_code == 302
+            assert "google=connected" in resp.headers.get("location", "")
+
+        # Verify integration was created
+        from sqlmodel import select
+        integrations = db_session.exec(select(Integration)).all()
+        assert len(integrations) == 1
+        assert integrations[0].type == IntegrationType.google_calendar
+        assert integrations[0].name == "Google Calendar"
+
+
+# ---------------------------------------------------------------------------
+# Calendar listing
+# ---------------------------------------------------------------------------
+
+
+class TestListCalendars:
+    @pytest.mark.anyio
+    async def test_calendars_not_found(self, db_session):
+        """Returns 404 for missing integration."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/integrations/00000000-0000-0000-0000-000000000000/calendars"
+            )
+            assert resp.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_calendars_wrong_type(self, db_session, sample_webhook_config):
+        """Returns 400 for non-Google Calendar integration."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await _create_integration(client, config=sample_webhook_config)
+            resp = await client.get(f"/api/integrations/{created['id']}/calendars")
+            assert resp.status_code == 400
+
+    @pytest.mark.anyio
+    async def test_calendars_no_refresh_token(self, db_session, sample_google_config):
+        """Returns 422 when integration has no refresh token."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await _create_integration(
+                client, name="GCal", type_="google_calendar", config=sample_google_config
+            )
+            resp = await client.get(f"/api/integrations/{created['id']}/calendars")
+            assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Backwards compatibility: validation with global credentials
+# ---------------------------------------------------------------------------
+
+
+class TestValidationBackwardsCompat:
+    @pytest.mark.anyio
+    async def test_create_google_with_global_creds(self, db_session, monkeypatch):
+        """Can create Google Calendar integration without client_id when global creds exist."""
+        from app import config as config_mod
+        monkeypatch.setattr(config_mod.settings, "google_client_id", "global-id")
+        monkeypatch.setattr(config_mod.settings, "google_client_secret", "global-secret")
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/integrations",
+                json={
+                    "type": "google_calendar",
+                    "name": "Auto Calendar",
+                    "config": {"calendar_id": "primary", "refresh_token": "some-token"},
+                },
+            )
+            assert resp.status_code == 201
+            data = resp.json()
+            assert data["name"] == "Auto Calendar"
+
+    @pytest.mark.anyio
+    async def test_manual_creds_still_work(self, db_session, sample_google_config):
+        """Existing manual credential flow still works."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/integrations",
+                json={
+                    "type": "google_calendar",
+                    "name": "Manual Calendar",
+                    "config": sample_google_config,
+                },
+            )
+            assert resp.status_code == 201

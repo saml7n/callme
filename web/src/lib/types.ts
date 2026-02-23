@@ -68,6 +68,16 @@ export interface IntegrationTestResult {
   detail: string
 }
 
+export interface GoogleOAuthStatus {
+  configured: boolean
+}
+
+export interface CalendarEntry {
+  id: string
+  summary: string
+  primary: boolean
+}
+
 /** Actions available per integration type. */
 export const INTEGRATION_ACTIONS: Record<IntegrationType, { value: string; label: string }[]> = {
   google_calendar: [

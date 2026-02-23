@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     public_url: str = ""
     database_url: str = "sqlite:///./callme.db"
 
+    # Google OAuth (server-side credentials for one-click calendar setup)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
     # Auth — API key for dashboard + API access
     callme_api_key: str = ""
 

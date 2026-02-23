@@ -1,8 +1,10 @@
 /** API client for the CallMe backend. */
 
 import type {
+  CalendarEntry,
   CallDetail,
   CallListItem,
+  GoogleOAuthStatus,
   IntegrationItem,
   IntegrationTestResult,
   IntegrationType,
@@ -148,6 +150,15 @@ export const api = {
 
     oauthStart: (id: string) =>
       request<{ url: string }>(`/api/integrations/${id}/oauth/start`),
+
+    googleStatus: () =>
+      request<GoogleOAuthStatus>('/api/integrations/google/status'),
+
+    googleConnect: () =>
+      request<{ url: string }>('/api/integrations/google/connect'),
+
+    calendars: (id: string) =>
+      request<CalendarEntry[]>(`/api/integrations/${id}/calendars`),
   },
 
   settings: {

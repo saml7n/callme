@@ -15,6 +15,9 @@ vi.mock('@/lib/api', () => ({
       delete: vi.fn(),
       test: vi.fn(),
       oauthStart: vi.fn(),
+      googleStatus: vi.fn(),
+      googleConnect: vi.fn(),
+      calendars: vi.fn(),
     },
   },
 }))
@@ -49,6 +52,8 @@ const mockIntegrations = [
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Default: server-side Google OAuth not configured
+  ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: false })
 })
 
 // ===========================================================================
@@ -256,5 +261,173 @@ describe('ActionNode – integration rendering', () => {
     const { container } = render(<ActionNode data={data} {...baseProps} />)
     const sourceHandle = container.querySelector('[data-testid="handle-source"]')
     expect(sourceHandle).toBeNull()
+  })
+})
+
+// ===========================================================================
+// Story 21 — One-click Google Calendar OAuth
+// ===========================================================================
+
+describe('Integrations page — One-click Google OAuth (Story 21)', () => {
+  function renderPage(initialEntries = ['/settings/integrations']) {
+    return render(
+      <MemoryRouter initialEntries={initialEntries}>
+        <Routes>
+          <Route path="/settings/integrations" element={<Integrations />} />
+          <Route path="/" element={<div>Home</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('shows "Connect with Google" button when server reports configured: true', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('google-connect-btn')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Connect with Google')).toBeInTheDocument()
+  })
+
+  it('does NOT show "Connect with Google" button when configured: false', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: false })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('No integrations configured')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('google-connect-btn')).not.toBeInTheDocument()
+  })
+
+  it('shows fallback message when Google OAuth is not configured', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: false })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('google-not-configured')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/Ask your admin to configure/)).toBeInTheDocument()
+  })
+
+  it('clicking "Connect with Google" redirects to OAuth URL', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    ;(api.integrations.googleConnect as Mock).mockResolvedValue({ url: 'https://accounts.google.com/oauth?test' })
+
+    // Mock window.location.href setter
+    const originalLocation = window.location
+    const hrefSetter = vi.fn()
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, href: '' },
+      writable: true,
+    })
+    Object.defineProperty(window.location, 'href', {
+      set: hrefSetter,
+      get: () => '',
+    })
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('google-connect-btn')).toBeInTheDocument()
+    })
+    await userEvent.click(screen.getByTestId('google-connect-btn'))
+    await waitFor(() => {
+      expect(api.integrations.googleConnect).toHaveBeenCalled()
+    })
+
+    // Restore
+    Object.defineProperty(window, 'location', { value: originalLocation, writable: true })
+  })
+
+  it('shows success toast on redirect with ?google=connected', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    renderPage(['/settings/integrations?google=connected'])
+    await waitFor(() => {
+      expect(screen.getByTestId('success-toast')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Google Calendar connected successfully!')).toBeInTheDocument()
+  })
+
+  it('shows "Connected" badge for integration with refresh_token', async () => {
+    const connectedIntegration = {
+      id: 'int-g1',
+      type: 'google_calendar' as const,
+      name: 'My Google Calendar',
+      config_redacted: { calendar_id: 'primary', refresh_token: '••••abcd' },
+      created_at: '2024-06-01T10:00:00Z',
+      updated_at: '2024-06-01T10:00:00Z',
+    }
+    ;(api.integrations.list as Mock).mockResolvedValue([connectedIntegration])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('My Google Calendar')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+  })
+
+  it('shows Disconnect button for connected Google Calendar', async () => {
+    const connectedIntegration = {
+      id: 'int-g1',
+      type: 'google_calendar' as const,
+      name: 'Google Calendar',
+      config_redacted: { calendar_id: 'primary', refresh_token: '••••abcd' },
+      created_at: '2024-06-01T10:00:00Z',
+      updated_at: '2024-06-01T10:00:00Z',
+    }
+    ;(api.integrations.list as Mock).mockResolvedValue([connectedIntegration])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('disconnect-btn-int-g1')).toBeInTheDocument()
+    })
+  })
+
+  it('shows Calendars button for connected Google Calendar', async () => {
+    const connectedIntegration = {
+      id: 'int-g1',
+      type: 'google_calendar' as const,
+      name: 'Google Calendar',
+      config_redacted: { calendar_id: 'primary', refresh_token: '••••abcd' },
+      created_at: '2024-06-01T10:00:00Z',
+      updated_at: '2024-06-01T10:00:00Z',
+    }
+    ;(api.integrations.list as Mock).mockResolvedValue([connectedIntegration])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: true })
+    ;(api.integrations.calendars as Mock).mockResolvedValue([
+      { id: 'primary', summary: 'My Calendar', primary: true },
+      { id: 'work@group.calendar.google.com', summary: 'Work', primary: false },
+    ])
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('calendars-btn-int-g1')).toBeInTheDocument()
+    })
+
+    // Click to load calendars
+    await userEvent.click(screen.getByTestId('calendars-btn-int-g1'))
+    await waitFor(() => {
+      expect(screen.getByTestId('calendar-picker-int-g1')).toBeInTheDocument()
+    })
+  })
+
+  it('shows manual form fields when Google OAuth is NOT configured (create mode)', async () => {
+    ;(api.integrations.list as Mock).mockResolvedValue([])
+    ;(api.integrations.googleStatus as Mock).mockResolvedValue({ configured: false })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('No integrations configured')).toBeInTheDocument()
+    })
+
+    // Open create dialog
+    const addButtons = screen.getAllByText('+ Add Integration')
+    await userEvent.click(addButtons[0])
+    await waitFor(() => {
+      expect(screen.getByText('New Integration')).toBeInTheDocument()
+    })
+
+    // Default type is webhook — webhook fields always visible
+    expect(screen.getByPlaceholderText('https://example.com/hook')).toBeInTheDocument()
   })
 })
