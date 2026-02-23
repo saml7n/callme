@@ -97,4 +97,4 @@ def get_openai_api_key(user_id: UUID | None = None) -> str:
 
 def get_admin_phone_number(user_id: UUID | None = None) -> str:
     """Return the admin phone number for alerts."""
-    return _resolve("admin_phone_number", "", user_id)
+    return _resolve("admin_phone_number", settings.callme_fallback_number, user_id)
