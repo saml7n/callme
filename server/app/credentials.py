@@ -1,8 +1,12 @@
 """Runtime credential resolver.
 
 Provides API keys to the STT, TTS, LLM, and Twilio clients by checking:
-1. Environment variables (via ``app.config.settings``) — takes precedence.
-2. Database settings store — fallback (set via the setup wizard).
+1. Database settings store (set via the setup wizard) — takes precedence.
+2. Environment variables (via ``app.config.settings``) — local dev fallback.
+
+This ensures that in production the user's keys (entered through the UI)
+always win, while the ``.env`` file remains a convenience for local
+development when the database is empty.
 
 This module is the single source of truth for runtime credentials.
 """
@@ -29,32 +33,32 @@ def _from_db(key: str) -> str:
 
 def get_twilio_account_sid() -> str:
     """Return the Twilio Account SID."""
-    return settings.twilio_account_sid or _from_db("twilio_account_sid")
+    return _from_db("twilio_account_sid") or settings.twilio_account_sid
 
 
 def get_twilio_auth_token() -> str:
     """Return the Twilio Auth Token."""
-    return settings.twilio_auth_token or _from_db("twilio_auth_token")
+    return _from_db("twilio_auth_token") or settings.twilio_auth_token
 
 
 def get_twilio_phone_number() -> str:
     """Return the Twilio phone number."""
-    return settings.twilio_phone_number or _from_db("twilio_phone_number")
+    return _from_db("twilio_phone_number") or settings.twilio_phone_number
 
 
 def get_deepgram_api_key() -> str:
     """Return the Deepgram API key."""
-    return settings.deepgram_api_key or _from_db("deepgram_api_key")
+    return _from_db("deepgram_api_key") or settings.deepgram_api_key
 
 
 def get_elevenlabs_api_key() -> str:
     """Return the ElevenLabs API key."""
-    return settings.elevenlabs_api_key or _from_db("elevenlabs_api_key")
+    return _from_db("elevenlabs_api_key") or settings.elevenlabs_api_key
 
 
 def get_openai_api_key() -> str:
     """Return the OpenAI API key."""
-    return settings.openai_api_key or _from_db("openai_api_key")
+    return _from_db("openai_api_key") or settings.openai_api_key
 
 
 def get_admin_phone_number() -> str:

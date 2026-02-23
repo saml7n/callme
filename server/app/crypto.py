@@ -38,9 +38,21 @@ def _get_fernet() -> Fernet:
         key_str = Fernet.generate_key().decode()
         env_path = Path(__file__).resolve().parent.parent.parent / ".env"
         try:
-            with open(env_path, "a") as f:
-                f.write(f"\nCALLME_ENCRYPTION_KEY={key_str}\n")
-            logger.info("Generated new encryption key and saved to .env")
+            # Read existing content and check if key already present
+            existing = ""
+            if env_path.exists():
+                existing = env_path.read_text()
+            if "CALLME_ENCRYPTION_KEY=" not in existing:
+                with open(env_path, "a") as f:
+                    f.write(f"\nCALLME_ENCRYPTION_KEY={key_str}\n")
+                logger.info("Generated new encryption key and saved to .env")
+            else:
+                logger.info("Encryption key already in .env but not in env — using file value")
+                # Parse the existing key from the file
+                for line in existing.splitlines():
+                    if line.startswith("CALLME_ENCRYPTION_KEY="):
+                        key_str = line.split("=", 1)[1].strip()
+                        break
         except OSError:
             logger.warning("Could not write encryption key to .env — using ephemeral key")
 
