@@ -26,10 +26,11 @@ logger = logging.getLogger(__name__)
 def _from_db(key: str, user_id: UUID | None = None) -> str:
     """Read a setting from the DB settings store. Returns '' on failure."""
     try:
-        from app.db.session import get_session
+        from app.db.session import _engine
         from app.api.settings import get_setting
-        session = next(get_session())
-        return get_setting(session, key, user_id=user_id) or ""
+        from sqlmodel import Session
+        with Session(_engine) as session:
+            return get_setting(session, key, user_id=user_id) or ""
     except Exception:
         return ""
 

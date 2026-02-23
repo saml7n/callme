@@ -1,0 +1,383 @@
+{
+  "id": "wf_dentist_practice",
+  "name": "Smile Dental — Full Practice Flow",
+  "version": 1,
+  "entry_node_id": "greeting",
+  "nodes": [
+    {
+      "id": "greeting",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are the AI receptionist for Smile Dental, a modern family dental practice at 14 High Street, London EC2V 8AF. Greet the caller warmly and ask how you can help. If they sound distressed or mention pain, acknowledge it with empathy before routing. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Hello?" },
+          { "role": "assistant", "content": "Hi there! Thanks for calling Smile Dental. How can I help you today?" },
+          { "role": "user", "content": "My tooth is killing me" },
+          { "role": "assistant", "content": "I'm sorry to hear you're in pain — let me get you sorted right away. Can you tell me a little more about what's going on?" }
+        ],
+        "max_iterations": 5
+      },
+      "position": { "x": 400, "y": 0 }
+    },
+    {
+      "id": "main_router",
+      "type": "decision",
+      "data": {
+        "instruction": "Classify the caller's primary intent into one of these categories: (1) They are in pain or have a dental emergency. (2) They want to book, reschedule, or cancel an appointment. (3) They have a question about insurance, billing, or costs. (4) They have a general question about services, hours, or location. (5) They want to speak with a specific dentist or staff member."
+      },
+      "position": { "x": 400, "y": 180 }
+    },
+
+    {
+      "id": "emergency_triage",
+      "type": "conversation",
+      "data": {
+        "instructions": "The caller may have a dental emergency. Ask brief triage questions: What happened? When did it start? How severe is the pain on a scale of 1-10? Is there bleeding or swelling? Based on their answers, reassure them and let them know next steps. If pain is 7+ or there's trauma, recommend they come in immediately or go to A&E. If less urgent, offer the next available emergency slot. Keep responses empathetic and to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "I chipped my front tooth" },
+          { "role": "assistant", "content": "Oh no! Are you in any pain, and is there any bleeding?" },
+          { "role": "user", "content": "It's about a 5, no bleeding" },
+          { "role": "assistant", "content": "That's manageable — I'd recommend coming in today if possible so we can assess and repair it. Shall I check for an emergency slot?" }
+        ],
+        "max_iterations": 8
+      },
+      "position": { "x": 0, "y": 380 }
+    },
+    {
+      "id": "emergency_decision",
+      "type": "decision",
+      "data": {
+        "instruction": "Based on the triage conversation, decide: (1) The caller needs an immediate emergency appointment and wants to book one. (2) The situation is critical — they should be transferred to a dentist or directed to A&E. (3) The issue is non-urgent and can be handled as a regular booking."
+      },
+      "position": { "x": 0, "y": 560 }
+    },
+
+    {
+      "id": "appointment_type_router",
+      "type": "decision",
+      "data": {
+        "instruction": "Determine the type of appointment action: (1) The caller wants to book a new appointment. (2) The caller wants to reschedule an existing appointment. (3) The caller wants to cancel an existing appointment."
+      },
+      "position": { "x": 300, "y": 380 }
+    },
+    {
+      "id": "book_appointment",
+      "type": "conversation",
+      "data": {
+        "instructions": "Help the caller book a dental appointment at Smile Dental. Collect: (1) Full name, (2) Contact number, (3) Type of appointment — choose from: Check-up (30 min), Cleaning (45 min), Filling (60 min), Whitening (90 min), Invisalign consultation (45 min), Paediatric check-up (30 min), Emergency (30 min). (4) Preferred date and time. Hours: Mon-Fri 8:30am-6pm, Sat 9am-1pm. Closed Sunday. Confirm all details before finishing. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "I'd like a cleaning" },
+          { "role": "assistant", "content": "Great choice! Could I get your full name to start?" },
+          { "role": "user", "content": "Sarah Jones, and can I come Saturday?" },
+          { "role": "assistant", "content": "Of course, Sarah! We have Saturday slots at 9am, 10am, and 11:30am — which works best for you?" }
+        ],
+        "max_iterations": 12
+      },
+      "position": { "x": 200, "y": 580 }
+    },
+    {
+      "id": "reschedule_appointment",
+      "type": "conversation",
+      "data": {
+        "instructions": "Help the caller reschedule their existing appointment. Ask for their name, the approximate date of their current appointment, and their preferred new date and time. Hours: Mon-Fri 8:30am-6pm, Sat 9am-1pm. Confirm the change. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "I need to move my Thursday appointment" },
+          { "role": "assistant", "content": "No problem! Can I get your name so I can find your booking?" },
+          { "role": "user", "content": "David Patel, it's this Thursday at 2pm" },
+          { "role": "assistant", "content": "Thanks, David. When would you like to reschedule to?" }
+        ],
+        "max_iterations": 8
+      },
+      "position": { "x": 400, "y": 580 }
+    },
+    {
+      "id": "cancel_appointment",
+      "type": "conversation",
+      "data": {
+        "instructions": "Help the caller cancel their appointment. Ask for their name and the date of the appointment. Let them know we require 24 hours notice to avoid a £25 cancellation fee. Confirm the cancellation and ask if they'd like to rebook for another time. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "I need to cancel my appointment" },
+          { "role": "assistant", "content": "I can help with that. Could I get your name and the date of the appointment?" },
+          { "role": "user", "content": "Emma Wilson, next Monday at 3pm" },
+          { "role": "assistant", "content": "Thanks, Emma. Since that's more than 24 hours away there's no cancellation fee. Shall I go ahead and cancel, or would you prefer to reschedule?" }
+        ],
+        "max_iterations": 8
+      },
+      "position": { "x": 600, "y": 580 }
+    },
+
+    {
+      "id": "insurance_billing",
+      "type": "conversation",
+      "data": {
+        "instructions": "Answer questions about insurance and billing at Smile Dental. We accept: NHS treatments (Band 1 £26.80, Band 2 £73.50, Band 3 £319.10), Bupa Dental Cover, AXA PPP, Vitality, and Denplan. Private pricing: Check-up £65, Cleaning £85, Fillings from £120, Whitening £350, Invisalign from £2,500, Emergency appointment £95. Payment: card, bank transfer, or interest-free payment plans available for treatments over £500. If you can't answer a specific billing question, offer to transfer to accounts. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Do you take Bupa?" },
+          { "role": "assistant", "content": "Yes, we accept Bupa Dental Cover! Just bring your membership details to your appointment and we'll handle the claim for you." },
+          { "role": "user", "content": "How much is Invisalign?" },
+          { "role": "assistant", "content": "Invisalign starts from £2,500 depending on complexity. We offer interest-free payment plans for treatments over £500. Would you like to book a consultation?" }
+        ],
+        "max_iterations": 10
+      },
+      "position": { "x": 750, "y": 380 }
+    },
+
+    {
+      "id": "general_info",
+      "type": "conversation",
+      "data": {
+        "instructions": "Answer general questions about Smile Dental. Address: 14 High Street, London EC2V 8AF (nearest tube: Bank). Hours: Mon-Fri 8:30am-6pm, Sat 9am-1pm, closed Sunday. Team: Dr Anika Sharma (principal dentist, cosmetic specialist), Dr James Liu (general & paediatric), Dr Priya Kapoor (orthodontics & Invisalign), plus three hygienists. Parking: pay-and-display on High Street, NCP car park 2 min walk. Accessibility: ground floor, wheelchair accessible, hearing loop available. New patients welcome — first visit includes full examination, X-rays, and treatment plan. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Where are you located?" },
+          { "role": "assistant", "content": "We're at 14 High Street, London EC2V 8AF — the nearest tube station is Bank. There's also pay-and-display parking on High Street." },
+          { "role": "user", "content": "Are you taking new patients?" },
+          { "role": "assistant", "content": "Absolutely! Your first visit includes a full examination, X-rays, and a personalised treatment plan. Would you like to book?" }
+        ],
+        "max_iterations": 10
+      },
+      "position": { "x": 950, "y": 380 }
+    },
+
+    {
+      "id": "transfer_decision",
+      "type": "conversation",
+      "data": {
+        "instructions": "The caller wants to speak with a specific person. Ask who they'd like to speak with. Available: Dr Anika Sharma (principal dentist), Dr James Liu, Dr Priya Kapoor, or the accounts/billing team. If the person isn't available, offer to take a message or suggest an alternative. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "Can I speak to Dr Sharma?" },
+          { "role": "assistant", "content": "Dr Sharma is with a patient at the moment. Would you like me to transfer you to her voicemail, or can I take a message?" },
+          { "role": "user", "content": "Just transfer me please" },
+          { "role": "assistant", "content": "Of course — I'll put you through now." }
+        ],
+        "max_iterations": 5
+      },
+      "position": { "x": 1150, "y": 380 }
+    },
+
+    {
+      "id": "anything_else",
+      "type": "conversation",
+      "data": {
+        "instructions": "The caller's request has been handled. Ask if there's anything else you can help with. If they say no, thank them warmly. If they have another question, acknowledge it. Keep responses to 1 sentence.",
+        "examples": [
+          { "role": "user", "content": "That's everything, thanks" },
+          { "role": "assistant", "content": "Wonderful — thanks for calling Smile Dental, have a lovely day!" },
+          { "role": "user", "content": "Actually, one more thing" },
+          { "role": "assistant", "content": "Of course, go ahead!" }
+        ],
+        "max_iterations": 3
+      },
+      "position": { "x": 400, "y": 800 }
+    },
+    {
+      "id": "follow_up_router",
+      "type": "decision",
+      "data": {
+        "instruction": "Has the caller indicated they have another question or need, or are they done and ready to end the call?"
+      },
+      "position": { "x": 400, "y": 960 }
+    },
+
+    {
+      "id": "end_call",
+      "type": "action",
+      "data": {
+        "action_type": "end_call",
+        "message": "Thank you for calling Smile Dental! We look forward to seeing you. Have a wonderful day — goodbye!"
+      },
+      "position": { "x": 250, "y": 1120 }
+    },
+    {
+      "id": "transfer_to_staff",
+      "type": "action",
+      "data": {
+        "action_type": "transfer",
+        "target_number": "+441279969211",
+        "announcement": "I'll connect you now — please hold for just a moment."
+      },
+      "position": { "x": 1150, "y": 580 }
+    },
+    {
+      "id": "transfer_emergency",
+      "type": "action",
+      "data": {
+        "action_type": "transfer",
+        "target_number": "+441279969211",
+        "announcement": "I'm connecting you to one of our dentists right away. Please stay on the line."
+      },
+      "position": { "x": -150, "y": 740 }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_greeting_to_main",
+      "source": "greeting",
+      "target": "main_router",
+      "label": "Caller has stated their need or reason for calling"
+    },
+
+    {
+      "id": "e_main_to_emergency",
+      "source": "main_router",
+      "target": "emergency_triage",
+      "label": "Caller is in pain, has had dental trauma, or describes an urgent dental issue"
+    },
+    {
+      "id": "e_main_to_appointment",
+      "source": "main_router",
+      "target": "appointment_type_router",
+      "label": "Caller wants to book, reschedule, or cancel an appointment"
+    },
+    {
+      "id": "e_main_to_insurance",
+      "source": "main_router",
+      "target": "insurance_billing",
+      "label": "Caller has a question about insurance, costs, billing, or payment plans"
+    },
+    {
+      "id": "e_main_to_general",
+      "source": "main_router",
+      "target": "general_info",
+      "label": "Caller has a general question about services, hours, location, or the dental team"
+    },
+    {
+      "id": "e_main_to_transfer",
+      "source": "main_router",
+      "target": "transfer_decision",
+      "label": "Caller wants to speak with a specific dentist or staff member"
+    },
+
+    {
+      "id": "e_emergency_to_decision",
+      "source": "emergency_triage",
+      "target": "emergency_decision",
+      "label": "Triage questions have been answered and the situation is assessed"
+    },
+    {
+      "id": "e_emergency_to_booking",
+      "source": "emergency_decision",
+      "target": "book_appointment",
+      "label": "Caller needs an emergency appointment and is ready to book"
+    },
+    {
+      "id": "e_emergency_to_transfer",
+      "source": "emergency_decision",
+      "target": "transfer_emergency",
+      "label": "Situation is critical — caller should be transferred to a dentist immediately"
+    },
+    {
+      "id": "e_emergency_to_regular",
+      "source": "emergency_decision",
+      "target": "appointment_type_router",
+      "label": "Issue is non-urgent and can be handled as a normal appointment"
+    },
+
+    {
+      "id": "e_appt_to_book",
+      "source": "appointment_type_router",
+      "target": "book_appointment",
+      "label": "Caller wants to book a new appointment"
+    },
+    {
+      "id": "e_appt_to_reschedule",
+      "source": "appointment_type_router",
+      "target": "reschedule_appointment",
+      "label": "Caller wants to reschedule an existing appointment"
+    },
+    {
+      "id": "e_appt_to_cancel",
+      "source": "appointment_type_router",
+      "target": "cancel_appointment",
+      "label": "Caller wants to cancel an existing appointment"
+    },
+
+    {
+      "id": "e_book_to_anything",
+      "source": "book_appointment",
+      "target": "anything_else",
+      "label": "Appointment details are confirmed and booking is complete"
+    },
+    {
+      "id": "e_reschedule_to_anything",
+      "source": "reschedule_appointment",
+      "target": "anything_else",
+      "label": "Appointment has been rescheduled and confirmed"
+    },
+    {
+      "id": "e_cancel_to_anything",
+      "source": "cancel_appointment",
+      "target": "anything_else",
+      "label": "Appointment has been cancelled and caller doesn't want to rebook"
+    },
+    {
+      "id": "e_cancel_to_book",
+      "source": "cancel_appointment",
+      "target": "book_appointment",
+      "label": "Caller wants to rebook for a different date after cancelling"
+    },
+
+    {
+      "id": "e_insurance_to_anything",
+      "source": "insurance_billing",
+      "target": "anything_else",
+      "label": "Caller's billing or insurance question has been answered"
+    },
+    {
+      "id": "e_insurance_to_transfer",
+      "source": "insurance_billing",
+      "target": "transfer_to_staff",
+      "label": "Question is too specific — caller needs to speak with the accounts team"
+    },
+    {
+      "id": "e_insurance_to_book",
+      "source": "insurance_billing",
+      "target": "book_appointment",
+      "label": "After learning about costs, caller wants to book an appointment"
+    },
+
+    {
+      "id": "e_general_to_anything",
+      "source": "general_info",
+      "target": "anything_else",
+      "label": "Caller's general question has been answered"
+    },
+    {
+      "id": "e_general_to_book",
+      "source": "general_info",
+      "target": "book_appointment",
+      "label": "After getting info, caller wants to book an appointment"
+    },
+
+    {
+      "id": "e_transfer_decision_to_staff",
+      "source": "transfer_decision",
+      "target": "transfer_to_staff",
+      "label": "Caller is ready to be transferred to the requested person"
+    },
+    {
+      "id": "e_transfer_decision_to_anything",
+      "source": "transfer_decision",
+      "target": "anything_else",
+      "label": "Caller decides not to transfer and wants to handle it over the phone instead"
+    },
+
+    {
+      "id": "e_anything_to_followup",
+      "source": "anything_else",
+      "target": "follow_up_router",
+      "label": "Caller has responded about whether they need anything else"
+    },
+    {
+      "id": "e_followup_to_main",
+      "source": "follow_up_router",
+      "target": "main_router",
+      "label": "Caller has another question or request"
+    },
+    {
+      "id": "e_followup_to_end",
+      "source": "follow_up_router",
+      "target": "end_call",
+      "label": "Caller is done and ready to hang up"
+    }
+  ]
+}

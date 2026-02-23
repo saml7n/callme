@@ -25,8 +25,13 @@ from sqlmodel import Session, select
 
 from app.db.call_logger import CallLogger
 from app.db.models import Call, PhoneNumber, Workflow as WorkflowModel
-from app.db.session import get_session
 from app.events import event_bus
+
+
+def _get_engine():
+    """Lazily import the engine to avoid circular imports."""
+    from app.db.session import _engine
+    return _engine
 from app.pipeline import CallPipeline
 
 logger = logging.getLogger(__name__)
@@ -109,48 +114,47 @@ def _load_active_workflow(to_number: str = "") -> tuple[dict[str, Any] | None, A
     Returns (workflow_dict, workflow_db_id, workflow_name, user_id).
     """
     try:
-        session = next(get_session())
-
-        # 1) Route by phone number → user → active workflow
-        if to_number:
-            phone = session.exec(
-                select(PhoneNumber).where(PhoneNumber.number == to_number)
-            ).first()
-            if phone is not None and phone.user_id is not None:
-                # Find active workflow for this user on this phone number
-                db_wf = session.exec(
-                    select(WorkflowModel).where(
-                        WorkflowModel.is_active == True,  # noqa: E712
-                        WorkflowModel.phone_number == to_number,
-                        WorkflowModel.user_id == phone.user_id,
-                    )
+        with Session(_get_engine()) as session:
+            # 1) Route by phone number → user → active workflow
+            if to_number:
+                phone = session.exec(
+                    select(PhoneNumber).where(PhoneNumber.number == to_number)
                 ).first()
-                # Fallback: any active workflow for this user
-                if db_wf is None:
+                if phone is not None and phone.user_id is not None:
+                    # Find active workflow for this user on this phone number
                     db_wf = session.exec(
                         select(WorkflowModel).where(
                             WorkflowModel.is_active == True,  # noqa: E712
+                            WorkflowModel.phone_number == to_number,
                             WorkflowModel.user_id == phone.user_id,
                         )
                     ).first()
-                if db_wf is not None:
-                    logger.info(
-                        "Routed call to=%s → user=%s workflow=%s (%s)",
-                        to_number, phone.user_id, db_wf.name, db_wf.id,
+                    # Fallback: any active workflow for this user
+                    if db_wf is None:
+                        db_wf = session.exec(
+                            select(WorkflowModel).where(
+                                WorkflowModel.is_active == True,  # noqa: E712
+                                WorkflowModel.user_id == phone.user_id,
+                            )
+                        ).first()
+                    if db_wf is not None:
+                        logger.info(
+                            "Routed call to=%s → user=%s workflow=%s (%s)",
+                            to_number, phone.user_id, db_wf.name, db_wf.id,
+                        )
+                        return db_wf.graph_json, db_wf.id, db_wf.name, db_wf.user_id
+                    logger.warning(
+                        "Phone number %s owned by user %s but no active workflow found",
+                        to_number, phone.user_id,
                     )
-                    return db_wf.graph_json, db_wf.id, db_wf.name, db_wf.user_id
-                logger.warning(
-                    "Phone number %s owned by user %s but no active workflow found",
-                    to_number, phone.user_id,
-                )
 
-        # 2) Fallback: any globally active workflow
-        db_wf = session.exec(
-            select(WorkflowModel).where(WorkflowModel.is_active == True)  # noqa: E712
-        ).first()
-        if db_wf is not None:
-            logger.info("Loaded active workflow from DB: %s (id=%s)", db_wf.name, db_wf.id)
-            return db_wf.graph_json, db_wf.id, db_wf.name, db_wf.user_id
+            # 2) Fallback: any globally active workflow
+            db_wf = session.exec(
+                select(WorkflowModel).where(WorkflowModel.is_active == True)  # noqa: E712
+            ).first()
+            if db_wf is not None:
+                logger.info("Loaded active workflow from DB: %s (id=%s)", db_wf.name, db_wf.id)
+                return db_wf.graph_json, db_wf.id, db_wf.name, db_wf.user_id
     except Exception:
         logger.exception("Failed to load workflow from DB")
 
@@ -169,19 +173,21 @@ def _create_call_record(
 ) -> Call | None:
     """Create a Call record in the database. Returns the Call or None on error."""
     try:
-        session = next(get_session())
-        call = Call(
-            call_sid=call_sid,
-            from_number=from_number,
-            to_number=to_number,
-            workflow_id=workflow_id,
-            user_id=user_id,
-        )
-        session.add(call)
-        session.commit()
-        session.refresh(call)
-        logger.info("Created call record %s for call_sid=%s", call.id, call_sid)
-        return call
+        with Session(_get_engine()) as session:
+            call = Call(
+                call_sid=call_sid,
+                from_number=from_number,
+                to_number=to_number,
+                workflow_id=workflow_id,
+                user_id=user_id,
+            )
+            session.add(call)
+            session.commit()
+            session.refresh(call)
+            logger.info("Created call record %s for call_sid=%s", call.id, call_sid)
+            # Expunge so the object is usable outside the session
+            session.expunge(call)
+            return call
     except Exception:
         logger.exception("Failed to create call record")
         return None

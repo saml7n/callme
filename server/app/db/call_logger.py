@@ -22,7 +22,6 @@ from uuid import UUID
 from sqlmodel import Session
 
 from app.db.models import Call, CallEvent, EventType
-from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +73,11 @@ class CallLogger:
         if not self._pending:
             return
         try:
-            session = next(get_session())
-            for event in self._pending:
-                session.add(event)
-            session.commit()
+            from app.db.session import _engine
+            with Session(_engine) as session:
+                for event in self._pending:
+                    session.add(event)
+                session.commit()
             logger.debug("Flushed %d call events for call %s", len(self._pending), self._call_id)
             self._pending.clear()
         except Exception:
@@ -86,23 +86,24 @@ class CallLogger:
     def finalise(self, started_at: datetime | None = None) -> None:
         """Mark the call as ended and compute duration."""
         try:
-            session = next(get_session())
-            call = session.get(Call, self._call_id)
-            if call is not None:
-                now = datetime.now(timezone.utc)
-                call.ended_at = now
-                # Compute duration — handle both tz-aware and tz-naive started_at
-                ref = started_at or call.started_at
-                if ref is not None:
-                    if ref.tzinfo is None:
-                        ref = ref.replace(tzinfo=timezone.utc)
-                    call.duration_seconds = (now - ref).total_seconds()
-                session.add(call)
-                session.commit()
-                logger.info(
-                    "Call %s finalised: duration=%.1fs",
-                    self._call_id,
-                    call.duration_seconds or 0,
-                )
+            from app.db.session import _engine
+            with Session(_engine) as session:
+                call = session.get(Call, self._call_id)
+                if call is not None:
+                    now = datetime.now(timezone.utc)
+                    call.ended_at = now
+                    # Compute duration — handle both tz-aware and tz-naive started_at
+                    ref = started_at or call.started_at
+                    if ref is not None:
+                        if ref.tzinfo is None:
+                            ref = ref.replace(tzinfo=timezone.utc)
+                        call.duration_seconds = (now - ref).total_seconds()
+                    session.add(call)
+                    session.commit()
+                    logger.info(
+                        "Call %s finalised: duration=%.1fs",
+                        self._call_id,
+                        call.duration_seconds or 0,
+                    )
         except Exception:
             logger.exception("Failed to finalise call %s", self._call_id)

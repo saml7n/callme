@@ -12,6 +12,7 @@ from collections.abc import Generator
 from uuid import uuid4
 
 from sqlalchemy import inspect, text
+from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import settings
@@ -25,6 +26,7 @@ _engine = create_engine(
     settings.database_url,
     echo=False,
     connect_args={"check_same_thread": False},  # needed for SQLite
+    poolclass=StaticPool,  # single shared connection — avoids pool exhaustion
 )
 
 

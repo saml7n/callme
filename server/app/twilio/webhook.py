@@ -5,6 +5,7 @@ Routes calls based on the dialled number (``To``) to the correct user's workflow
 """
 
 import logging
+from html import escape as html_escape
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,11 +22,12 @@ router = APIRouter(prefix="/twilio", tags=["twilio"])
 
 def build_twiml(stream_url: str) -> str:
     """Return TwiML XML that connects the call to a bidirectional WebSocket stream."""
+    safe_url = html_escape(stream_url)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
-        f'<Stream url="{stream_url}" />'
+        f'<Stream url="{safe_url}" />'
         "</Connect>"
         "</Response>"
     )

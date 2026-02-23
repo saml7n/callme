@@ -110,8 +110,8 @@ def get_api_key() -> str:
 # Admin user helper
 # ---------------------------------------------------------------------------
 
-# Synthetic admin user returned for API key auth
-_ADMIN_USER: User | None = None
+# Cached admin user ID (plain UUID, safe across sessions)
+_admin_user_id: UUID | None = None
 
 
 def ensure_admin_user(session: Session) -> User:
@@ -121,23 +121,22 @@ def ensure_admin_user(session: Session) -> User:
     """
     from sqlmodel import select
 
-    global _ADMIN_USER
-    if _ADMIN_USER is not None:
-        # Verify it still exists
-        existing = session.get(User, _ADMIN_USER.id)
+    global _admin_user_id
+    if _admin_user_id is not None:
+        existing = session.get(User, _admin_user_id)
         if existing is not None:
             return existing
 
     existing = session.exec(select(User).where(User.email == "admin@local")).first()
     if existing is not None:
-        _ADMIN_USER = existing
+        _admin_user_id = existing.id
         return existing
 
     admin = User(email="admin@local", name="Admin", password_hash="")
     session.add(admin)
     session.commit()
     session.refresh(admin)
-    _ADMIN_USER = admin
+    _admin_user_id = admin.id
     logger.info("Created admin user: %s", admin.id)
     return admin
 
