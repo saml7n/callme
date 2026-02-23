@@ -154,6 +154,7 @@ export interface CallDetail {
 export interface SettingsResponse {
   settings: Record<string, string>
   configured: boolean
+  use_platform_keys: boolean
 }
 
 export interface ValidateResults {
@@ -205,4 +206,16 @@ export interface TransferResult {
   ok: boolean
   call_id: string
   transferred_to: string
+}
+
+// ---------------------------------------------------------------------------
+// Platform status (Story 23)
+// ---------------------------------------------------------------------------
+
+export interface PlatformStatus {
+  twilio: boolean
+  deepgram: boolean
+  elevenlabs: boolean
+  openai: boolean
+  has_any: boolean
 }

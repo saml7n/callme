@@ -9,6 +9,7 @@ import type {
   IntegrationTestResult,
   IntegrationType,
   PhoneNumberItem,
+  PlatformStatus,
   SettingsResponse,
   TemplateItem,
   TransferResult,
@@ -187,5 +188,9 @@ export const api = {
 
   templates: {
     list: () => request<TemplateItem[]>('/api/templates'),
+  },
+
+  platform: {
+    status: () => request<PlatformStatus>('/api/platform/status'),
   },
 }

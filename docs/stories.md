@@ -1293,13 +1293,13 @@ This requires per-user settings storage and a "use platform defaults" toggle in 
 
 ### Acceptance criteria
 
-- [ ] **Per-user settings.** The `Setting` table rows are scoped to `user_id`. Each user has their own set of API keys.
-- [ ] **Platform defaults.** If the host sets API keys in `.env`, new users see a "Use platform keys" option in the setup wizard. Selecting it copies the platform values into the user's settings.
-- [ ] **Setup wizard "shared mode" toggle.** Step 2 (API Keys) shows: "Use platform keys (recommended for quick start)" vs "Enter your own API keys". Platform keys option only appears if the server has them configured.
-- [ ] **Per-user phone number.** Each user can configure their own Twilio phone number. The webhook handler routes incoming calls to the correct user's workflow based on the dialled number.
-- [ ] **Call routing by phone number.** When a call arrives on a Twilio number, the server looks up which user owns that number and loads their workflow + credentials.
-- [ ] **Credential isolation.** User A's API keys are never visible to User B, even via API.
-- [ ] **Platform status endpoint.** `GET /api/platform/status` returns which services have platform-level keys configured (so the web can show the "use platform keys" option).
+- [x] **Per-user settings.** The `Setting` table rows are scoped to `user_id`. Each user has their own set of API keys.
+- [x] **Platform defaults.** If the host sets API keys in `.env`, new users see a "Use platform keys" option in the setup wizard. Selecting it copies the platform values into the user's settings.
+- [x] **Setup wizard "shared mode" toggle.** Step 2 (API Keys) shows: "Use platform keys (recommended for quick start)" vs "Enter your own API keys". Platform keys option only appears if the server has them configured.
+- [x] **Per-user phone number.** Each user can configure their own Twilio phone number. The webhook handler routes incoming calls to the correct user's workflow based on the dialled number.
+- [x] **Call routing by phone number.** When a call arrives on a Twilio number, the server looks up which user owns that number and loads their workflow + credentials.
+- [x] **Credential isolation.** User A's API keys are never visible to User B, even via API.
+- [x] **Platform status endpoint.** `GET /api/platform/status` returns which services have platform-level keys configured (so the web can show the "use platform keys" option).
 
 ### Technical notes
 

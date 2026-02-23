@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { PhoneNumberItem, TemplateItem, WorkflowDetail } from '@/lib/types'
+import type { PhoneNumberItem, PlatformStatus, TemplateItem, WorkflowDetail } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -69,6 +69,10 @@ export default function Setup() {
   const [saving, setSaving] = useState(false)
   const [expandedHints, setExpandedHints] = useState<Set<string>>(new Set())
 
+  // Platform keys state (Story 23)
+  const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null)
+  const [usePlatformKeys, setUsePlatformKeys] = useState(false)
+
   // Step 3 state
   const [twilioPhone, setTwilioPhone] = useState('')
   const [adminPhone, setAdminPhone] = useState('')
@@ -90,6 +94,14 @@ export default function Setup() {
 
     async function hydrate() {
       try {
+        // 0. Load platform status (which services have platform keys in .env)
+        try {
+          const ps = await api.platform.status()
+          if (!cancelled) setPlatformStatus(ps)
+        } catch {
+          // ignore — platform status is optional
+        }
+
         // 1. Load settings and pre-fill fields
         const res = await api.settings.get()
         if (cancelled) return
@@ -98,6 +110,11 @@ export default function Setup() {
           if (v) existing[k] = v
         }
         setSettings((prev) => ({ ...existing, ...prev }))
+
+        // Pre-fill "use platform keys" from saved setting
+        if (existing.use_platform_keys === '••••') {
+          setUsePlatformKeys(true)
+        }
 
         // Pre-fill phone numbers from saved settings
         if (existing.twilio_phone_number) setTwilioPhone((p) => p || existing.twilio_phone_number)
@@ -153,10 +170,11 @@ export default function Setup() {
   const saveSettings = async (fields: Record<string, string>) => {
     setSaving(true)
     try {
-      // Filter out redacted values (user hasn't changed them)
+      // Filter out redacted values (user hasn't changed them).
+      // Keep explicit empty strings — they clear a setting on the server.
       const toSave: Record<string, string> = {}
       for (const [k, v] of Object.entries(fields)) {
-        if (v && !v.startsWith('••••')) {
+        if (v === '' || (v && !v.startsWith('••••'))) {
           toSave[k] = v
         }
       }
@@ -169,12 +187,19 @@ export default function Setup() {
   }
 
   const handleValidateAll = async () => {
-    // Save first, then validate
-    const apiKeyFields: Record<string, string> = {}
-    for (const f of API_KEY_FIELDS) {
-      if (settings[f.key]) apiKeyFields[f.key] = settings[f.key]
+    if (usePlatformKeys) {
+      // Save the use_platform_keys flag, then validate (platform keys resolve on server)
+      await saveSettings({ use_platform_keys: 'true' })
+    } else {
+      // Save user's own keys, then validate
+      const apiKeyFields: Record<string, string> = {}
+      for (const f of API_KEY_FIELDS) {
+        if (settings[f.key]) apiKeyFields[f.key] = settings[f.key]
+      }
+      // Clear use_platform_keys if switching to own keys
+      apiKeyFields.use_platform_keys = ''
+      await saveSettings(apiKeyFields)
     }
-    await saveSettings(apiKeyFields)
 
     setValidating(true)
     try {
@@ -241,7 +266,10 @@ export default function Setup() {
     switch (s) {
       case 0: return true // Welcome
       case 1: {
-        // Allow proceeding if validation passed OR if all core keys are already saved (redacted)
+        // Allow proceeding if using platform keys (and validated) OR if all core keys are already saved
+        if (usePlatformKeys) {
+          return Object.values(validation).some((v) => v === 'ok')
+        }
         const validated = Object.values(validation).some((v) => v === 'ok')
         const coreKeys = ['twilio_account_sid', 'deepgram_api_key', 'elevenlabs_api_key', 'openai_api_key']
         const allConfigured = coreKeys.every((k) => settings[k] && settings[k].length > 0)
@@ -336,81 +364,171 @@ export default function Setup() {
           <div className="space-y-6" data-testid="step-api-keys">
             <div>
               <h2 className="text-2xl font-bold mb-1">API Keys</h2>
-              <p className="text-gray-400">Enter your API keys for each service. We'll test them all at once.</p>
+              <p className="text-gray-400">Connect the services that power your AI receptionist.</p>
             </div>
 
-            <div className="space-y-4">
-              {API_KEY_FIELDS.map((field) => {
-                const val = settings[field.key] ?? ''
-                const isRedacted = val.startsWith('••••')
-                return (
-                <div key={field.key} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor={field.key}>{field.label}</Label>
-                    <div className="flex items-center gap-2">
-                      {isRedacted && !validation[field.service] && (
-                        <Badge className="bg-gray-800 text-gray-400 border-gray-700/50">Saved</Badge>
-                      )}
-                      {validation[field.service] === 'ok' && (
-                        <Badge className="bg-green-900/50 text-green-400 border-green-700/50">✓ Valid</Badge>
-                      )}
-                      {validation[field.service] && validation[field.service] !== 'ok' && validation[field.service] !== 'not_configured' && (
-                        <Badge className="bg-red-900/50 text-red-400 border-red-700/50">✗ Error</Badge>
-                      )}
+            {/* Platform keys toggle — shown only when host has configured platform keys */}
+            {platformStatus?.has_any && (
+              <div className="space-y-3" data-testid="platform-keys-section">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setUsePlatformKeys(true); setValidation({}) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setUsePlatformKeys(true); setValidation({}) } }}
+                  className={`p-4 rounded-lg border cursor-pointer transition ${
+                    usePlatformKeys
+                      ? 'border-indigo-500 bg-indigo-950/30'
+                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      usePlatformKeys ? 'border-indigo-500' : 'border-gray-600'
+                    }`}>
+                      {usePlatformKeys && <div className="w-2 h-2 rounded-full bg-indigo-500" />}
+                    </div>
+                    <div>
+                      <div className="font-medium">Use platform keys</div>
+                      <div className="text-sm text-gray-400">Recommended for quick start — use pre-configured keys from the host.</div>
+                      <div className="flex gap-2 mt-2">
+                        {platformStatus.twilio && <Badge className="bg-green-900/50 text-green-400 border-green-700/50">Twilio</Badge>}
+                        {platformStatus.deepgram && <Badge className="bg-green-900/50 text-green-400 border-green-700/50">Deepgram</Badge>}
+                        {platformStatus.elevenlabs && <Badge className="bg-green-900/50 text-green-400 border-green-700/50">ElevenLabs</Badge>}
+                        {platformStatus.openai && <Badge className="bg-green-900/50 text-green-400 border-green-700/50">OpenAI</Badge>}
+                      </div>
                     </div>
                   </div>
-                  {isRedacted ? (
-                    <div className="flex gap-2">
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setUsePlatformKeys(false); setValidation({}) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setUsePlatformKeys(false); setValidation({}) } }}
+                  className={`p-4 rounded-lg border cursor-pointer transition ${
+                    !usePlatformKeys
+                      ? 'border-indigo-500 bg-indigo-950/30'
+                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      !usePlatformKeys ? 'border-indigo-500' : 'border-gray-600'
+                    }`}>
+                      {!usePlatformKeys && <div className="w-2 h-2 rounded-full bg-indigo-500" />}
+                    </div>
+                    <div>
+                      <div className="font-medium">Enter your own API keys</div>
+                      <div className="text-sm text-gray-400">Use your own accounts for full control and independent billing.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Own keys form — shown when not using platform keys or when platform is not configured */}
+            {!usePlatformKeys && (
+              <div className="space-y-4">
+                {API_KEY_FIELDS.map((field) => {
+                  const val = settings[field.key] ?? ''
+                  const isRedacted = val.startsWith('••••')
+                  return (
+                  <div key={field.key} className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor={field.key}>{field.label}</Label>
+                      <div className="flex items-center gap-2">
+                        {isRedacted && !validation[field.service] && (
+                          <Badge className="bg-gray-800 text-gray-400 border-gray-700/50">Saved</Badge>
+                        )}
+                        {validation[field.service] === 'ok' && (
+                          <Badge className="bg-green-900/50 text-green-400 border-green-700/50">✓ Valid</Badge>
+                        )}
+                        {validation[field.service] && validation[field.service] !== 'ok' && validation[field.service] !== 'not_configured' && (
+                          <Badge className="bg-red-900/50 text-red-400 border-red-700/50">✗ Error</Badge>
+                        )}
+                      </div>
+                    </div>
+                    {isRedacted ? (
+                      <div className="flex gap-2">
+                        <Input
+                          id={field.key}
+                          type="text"
+                          readOnly
+                          value={val}
+                          className="bg-gray-900 border-gray-700 text-gray-500 flex-1"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-gray-700 text-gray-400 shrink-0"
+                          onClick={() => updateSetting(field.key, '')}
+                        >
+                          Change
+                        </Button>
+                      </div>
+                    ) : (
                       <Input
                         id={field.key}
-                        type="text"
-                        readOnly
+                        type="password"
+                        placeholder={field.label}
                         value={val}
-                        className="bg-gray-900 border-gray-700 text-gray-500 flex-1"
+                        onChange={(e) => updateSetting(field.key, e.target.value)}
+                        className="bg-gray-900 border-gray-700"
                       />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-gray-700 text-gray-400 shrink-0"
-                        onClick={() => updateSetting(field.key, '')}
-                      >
-                        Change
-                      </Button>
+                    )}
+                    <button
+                      onClick={() => toggleHint(field.key)}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition"
+                    >
+                      {expandedHints.has(field.key) ? '▾' : '▸'} Where do I find this?
+                    </button>
+                    {expandedHints.has(field.key) && (
+                      <div className="text-xs text-gray-500 pl-4 border-l border-gray-800">
+                        {field.hint}.{' '}
+                        <a href={field.link} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                          Open dashboard →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )})}
+              </div>
+            )}
+
+            {/* Platform keys summary — when using platform keys, show what's available */}
+            {usePlatformKeys && (
+              <div className="p-4 rounded-lg border border-gray-800 bg-gray-900/50" data-testid="platform-keys-summary">
+                <p className="text-sm text-gray-400 mb-3">
+                  The following services are pre-configured by the platform host:
+                </p>
+                <div className="grid gap-2">
+                  {[
+                    { key: 'twilio', label: 'Twilio', available: platformStatus?.twilio },
+                    { key: 'deepgram', label: 'Deepgram', available: platformStatus?.deepgram },
+                    { key: 'elevenlabs', label: 'ElevenLabs', available: platformStatus?.elevenlabs },
+                    { key: 'openai', label: 'OpenAI', available: platformStatus?.openai },
+                  ].map((svc) => (
+                    <div key={svc.key} className="flex items-center gap-2 text-sm">
+                      {svc.available ? (
+                        <span className="text-green-400">✓</span>
+                      ) : (
+                        <span className="text-gray-600">—</span>
+                      )}
+                      <span className={svc.available ? 'text-gray-300' : 'text-gray-600'}>{svc.label}</span>
+                      {svc.available && validation[svc.key] === 'ok' && (
+                        <Badge className="bg-green-900/50 text-green-400 border-green-700/50 text-xs">Connected</Badge>
+                      )}
                     </div>
-                  ) : (
-                    <Input
-                      id={field.key}
-                      type="password"
-                      placeholder={field.label}
-                      value={val}
-                      onChange={(e) => updateSetting(field.key, e.target.value)}
-                      className="bg-gray-900 border-gray-700"
-                    />
-                  )}
-                  <button
-                    onClick={() => toggleHint(field.key)}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition"
-                  >
-                    {expandedHints.has(field.key) ? '▾' : '▸'} Where do I find this?
-                  </button>
-                  {expandedHints.has(field.key) && (
-                    <div className="text-xs text-gray-500 pl-4 border-l border-gray-800">
-                      {field.hint}.{' '}
-                      <a href={field.link} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
-                        Open dashboard →
-                      </a>
-                    </div>
-                  )}
+                  ))}
                 </div>
-              )})}
-            </div>
+              </div>
+            )}
 
             <Button
               onClick={handleValidateAll}
               disabled={validating}
               className="w-full"
             >
-              {validating ? 'Validating...' : 'Validate All'}
+              {validating ? 'Validating...' : usePlatformKeys ? 'Validate Platform Keys' : 'Validate All'}
             </Button>
           </div>
         )}

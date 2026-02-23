@@ -153,14 +153,32 @@ class CallPipeline:
         engine: WorkflowEngine | None = None,
         call_logger: CallLogger | None = None,
         call_id: str = "",
+        user_id: Any | None = None,
     ) -> None:
         self._ws = ws
         self._stream_sid = stream_sid
         self._call_sid = call_sid
         self._call_id = call_id
-        self._stt = stt or DeepgramSTTClient()
-        self._llm = llm or LLMClient()
-        self._tts = tts or ElevenLabsTTSClient()
+        self._user_id = user_id
+
+        # Resolve per-user credentials when a user_id is available
+        if user_id is not None and (stt is None or llm is None or tts is None):
+            from app.credentials import (
+                get_deepgram_api_key,
+                get_elevenlabs_api_key,
+                get_openai_api_key,
+            )
+            dg_key = get_deepgram_api_key(user_id=user_id)
+            el_key = get_elevenlabs_api_key(user_id=user_id)
+            oai_key = get_openai_api_key(user_id=user_id)
+            self._stt = stt or DeepgramSTTClient(api_key=dg_key or None)
+            self._llm = llm or LLMClient(api_key=oai_key or None)
+            self._tts = tts or ElevenLabsTTSClient(api_key=el_key or None)
+        else:
+            self._stt = stt or DeepgramSTTClient()
+            self._llm = llm or LLMClient()
+            self._tts = tts or ElevenLabsTTSClient()
+
         self._system_prompt = system_prompt
         self._greeting = greeting
         self._call_logger = call_logger
@@ -758,10 +776,10 @@ class CallPipeline:
             logger.error("Cannot use Twilio <Say>: no call_sid")
             return
 
-        account_sid = get_twilio_account_sid()
-        api_key_sid = get_twilio_api_key_sid()
-        api_key_secret = get_twilio_api_key_secret()
-        auth_token = get_twilio_auth_token()
+        account_sid = get_twilio_account_sid(user_id=self._user_id)
+        api_key_sid = get_twilio_api_key_sid(user_id=self._user_id)
+        api_key_secret = get_twilio_api_key_secret(user_id=self._user_id)
+        auth_token = get_twilio_auth_token(user_id=self._user_id)
 
         if api_key_sid and api_key_secret:
             auth_pair = (api_key_sid, api_key_secret)
@@ -838,10 +856,10 @@ class CallPipeline:
             logger.error("Cannot transfer: no call_sid available")
             return
 
-        account_sid = get_twilio_account_sid()
-        api_key_sid = get_twilio_api_key_sid()
-        api_key_secret = get_twilio_api_key_secret()
-        auth_token = get_twilio_auth_token()
+        account_sid = get_twilio_account_sid(user_id=self._user_id)
+        api_key_sid = get_twilio_api_key_sid(user_id=self._user_id)
+        api_key_secret = get_twilio_api_key_secret(user_id=self._user_id)
+        auth_token = get_twilio_auth_token(user_id=self._user_id)
 
         if api_key_sid and api_key_secret:
             auth_pair = (api_key_sid, api_key_secret)

@@ -12,6 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.db.session as session_mod
 import app.db.call_logger as call_logger_mod
+import app.twilio.media_stream as media_stream_mod
 from app.auth import get_current_user, require_auth
 import app.auth as auth_mod
 from app.db.models import Call, CallEvent, EventType, Integration, IntegrationType, PhoneNumber, User, Workflow
@@ -99,8 +100,10 @@ def db_session() -> Generator[Session, None, None]:
     # Monkey-patch at every import site
     original_session = session_mod.get_session
     original_call_logger = call_logger_mod.get_session
+    original_media_stream = media_stream_mod.get_session
     session_mod.get_session = _override
     call_logger_mod.get_session = _override
+    media_stream_mod.get_session = _override
 
     # FastAPI dependency override for endpoints using Depends(get_session)
     app.dependency_overrides[_original_get_session] = _override
@@ -118,6 +121,7 @@ def db_session() -> Generator[Session, None, None]:
     # Restore everything
     session_mod.get_session = original_session
     call_logger_mod.get_session = original_call_logger
+    media_stream_mod.get_session = original_media_stream
     app.dependency_overrides.pop(_original_get_session, None)
     app.dependency_overrides.pop(require_auth, None)
     app.dependency_overrides.pop(get_current_user, None)

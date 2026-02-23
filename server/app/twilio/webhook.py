@@ -1,9 +1,11 @@
 """Twilio incoming-call webhook — returns TwiML to open a bidirectional media stream.
 
 Validates the X-Twilio-Signature header when twilio_auth_token is configured.
+Routes calls based on the dialled number (``To``) to the correct user's workflow.
 """
 
 import logging
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -48,7 +50,9 @@ async def incoming_call(request: Request) -> Response:
     """Handle an inbound Twilio call.
 
     Returns TwiML instructing Twilio to open a bidirectional media stream
-    back to our WebSocket endpoint.
+    back to our WebSocket endpoint. The dialled number (``To``) and caller
+    (``From``) are forwarded as query parameters so the media-stream handler
+    can route calls to the correct user's workflow.
     """
     # Validate Twilio signature
     signature = request.headers.get("X-Twilio-Signature", "")
@@ -62,7 +66,12 @@ async def incoming_call(request: Request) -> Response:
     public_url = settings.public_url.rstrip("/")
     # Convert http(s) to ws(s) for the WebSocket URL
     ws_url = public_url.replace("https://", "wss://").replace("http://", "ws://")
-    stream_url = f"{ws_url}/twilio/media-stream"
+
+    # Pass call metadata as query params so the media stream can route correctly
+    to_number = form_data.get("To", "")
+    from_number = form_data.get("From", "")
+    qs = urlencode({"to": to_number, "from": from_number})
+    stream_url = f"{ws_url}/twilio/media-stream?{qs}"
 
     twiml = build_twiml(stream_url)
     return Response(content=twiml, media_type="application/xml")

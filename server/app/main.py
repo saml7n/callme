@@ -10,6 +10,7 @@ from app.api.calls import router as calls_router
 from app.api.integrations import router as integrations_router
 from app.api.live import router as live_router
 from app.api.phone_numbers import router as phone_numbers_router
+from app.api.platform import router as platform_router
 from app.api.settings import router as settings_router
 from app.api.templates import router as templates_router
 from app.api.workflows import router as workflows_router
@@ -89,6 +90,7 @@ app.include_router(calls_router)
 app.include_router(integrations_router)
 app.include_router(settings_router)
 app.include_router(templates_router)
+app.include_router(platform_router)
 
 
 @app.get("/health")

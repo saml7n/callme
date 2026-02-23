@@ -43,6 +43,7 @@ ALLOWED_KEYS = {
     "elevenlabs_api_key",
     "openai_api_key",
     "admin_phone_number",
+    "use_platform_keys",
 }
 
 
@@ -106,6 +107,7 @@ class SettingsOut(BaseModel):
     """GET response — keys with redacted values."""
     settings: dict[str, str]
     configured: bool
+    use_platform_keys: bool = False
 
 
 class SettingsPut(BaseModel):
@@ -139,7 +141,20 @@ async def get_settings(
     # "configured" is True if at least the 4 core API keys are set
     core_keys = {"twilio_account_sid", "deepgram_api_key", "elevenlabs_api_key", "openai_api_key"}
     configured = all(all_settings.get(k) for k in core_keys)
-    return SettingsOut(settings=redacted, configured=configured)
+
+    # Check if user is using platform keys (credential resolver falls back to env)
+    using_platform = all_settings.get("use_platform_keys") == "true"
+    if using_platform and not configured:
+        # When using platform keys, check if platform has the core keys
+        from app.config import settings as app_settings
+        configured = bool(
+            app_settings.twilio_account_sid
+            and app_settings.deepgram_api_key
+            and app_settings.elevenlabs_api_key
+            and app_settings.openai_api_key
+        )
+
+    return SettingsOut(settings=redacted, configured=configured, use_platform_keys=using_platform)
 
 
 @router.put("", response_model=SettingsOut)
@@ -182,6 +197,30 @@ async def validate_settings(
 ) -> ValidateResult:
     """Test each configured service and return per-service status."""
     all_settings = get_all_settings(session, user_id=user.id)
+
+    # When user uses platform keys, resolve credentials via the credential
+    # resolver which handles the fallback automatically.
+    using_platform = all_settings.get("use_platform_keys") == "true"
+    if using_platform:
+        from app.credentials import (
+            get_deepgram_api_key as _dg,
+            get_elevenlabs_api_key as _el,
+            get_openai_api_key as _oai,
+            get_twilio_account_sid as _tsid,
+            get_twilio_api_key_secret as _tsec,
+            get_twilio_api_key_sid as _tkid,
+            get_twilio_auth_token as _tat,
+        )
+        # Resolve credentials through the platform-aware resolver
+        all_settings = dict(all_settings)  # copy
+        all_settings.setdefault("twilio_account_sid", _tsid(user_id=user.id))
+        all_settings.setdefault("twilio_api_key_sid", _tkid(user_id=user.id))
+        all_settings.setdefault("twilio_api_key_secret", _tsec(user_id=user.id))
+        all_settings.setdefault("twilio_auth_token", _tat(user_id=user.id))
+        all_settings.setdefault("deepgram_api_key", _dg(user_id=user.id))
+        all_settings.setdefault("elevenlabs_api_key", _el(user_id=user.id))
+        all_settings.setdefault("openai_api_key", _oai(user_id=user.id))
+
     results: dict[str, str] = {}
 
     # Twilio — supports API Key (SID+Secret) or Auth Token for REST auth

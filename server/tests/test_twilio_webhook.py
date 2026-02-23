@@ -29,7 +29,7 @@ async def test_incoming_returns_twiml_xml(monkeypatch):
     assert "<Response>" in body
     assert "<Connect>" in body
     assert "<Stream" in body
-    assert 'url="wss://abc123.ngrok.io/twilio/media-stream"' in body
+    assert 'url="wss://abc123.ngrok.io/twilio/media-stream?' in body
 
 
 @pytest.mark.asyncio
@@ -47,4 +47,4 @@ async def test_incoming_converts_http_to_ws(monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/twilio/incoming")
 
-    assert 'url="ws://localhost:3000/twilio/media-stream"' in response.text
+    assert 'url="ws://localhost:3000/twilio/media-stream?' in response.text
