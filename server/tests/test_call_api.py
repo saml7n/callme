@@ -246,3 +246,38 @@ class TestCallLogAPI:
             # Skip two
             resp = await c.get("/api/calls?limit=10&offset=2")
             assert len(resp.json()) == 1
+
+
+class TestLiveCallCount:
+    """Tests for GET /api/calls/live/count endpoint."""
+
+    async def test_count_returns_zero_when_no_active_calls(self, db_session):
+        from app.events import event_bus
+
+        # Ensure empty
+        event_bus._active_calls.clear()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get("/api/calls/live/count")
+            assert resp.status_code == 200
+            assert resp.json() == {"count": 0}
+
+    async def test_count_returns_active_call_count(self, db_session):
+        from app.events import event_bus
+
+        event_bus._active_calls.clear()
+        # Register some fake active calls
+        event_bus._active_calls["call-1"] = {"call_id": "call-1"}
+        event_bus._active_calls["call-2"] = {"call_id": "call-2"}
+        event_bus._transcripts["call-1"] = []
+        event_bus._transcripts["call-2"] = []
+
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as c:
+                resp = await c.get("/api/calls/live/count")
+                assert resp.status_code == 200
+                assert resp.json() == {"count": 2}
+        finally:
+            event_bus._active_calls.clear()
+            event_bus._transcripts.clear()

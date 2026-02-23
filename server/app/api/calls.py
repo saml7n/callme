@@ -143,6 +143,12 @@ async def get_active_calls() -> list[dict]:
     return event_bus.get_active_calls()
 
 
+@router.get("/live/count")
+async def get_active_call_count() -> dict[str, int]:
+    """Return the number of currently active calls (lightweight)."""
+    return {"count": len(event_bus.get_active_calls())}
+
+
 @router.get("/{call_id}", response_model=CallDetail)
 async def get_call(
     call_id: UUID,

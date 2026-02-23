@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { clearToken } from '@/lib/auth'
 import { api } from '@/lib/api'
+import LiveCallBanner from '@/components/LiveCallBanner'
 
 /* ------------------------------------------------------------------ */
 /* Nav items                                                           */
@@ -70,6 +71,9 @@ export default function AppShell() {
             ))}
           </div>
         </div>
+
+        {/* Centre: live call banner */}
+        <LiveCallBanner />
 
         {/* Right: setup + sign-out */}
         <div className="flex items-center gap-3">

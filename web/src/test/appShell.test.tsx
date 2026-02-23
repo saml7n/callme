@@ -12,6 +12,9 @@ vi.mock('@/lib/api', () => ({
     auth: {
       configWarnings: vi.fn().mockResolvedValue({ warnings: [] }),
     },
+    calls: {
+      liveCount: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   },
 }))
 

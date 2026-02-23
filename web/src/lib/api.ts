@@ -106,6 +106,8 @@ export const api = {
 
     live: () => request<Record<string, unknown>[]>('/api/calls/live'),
 
+    liveCount: () => request<{ count: number }>('/api/calls/live/count'),
+
     transfer: (id: string) =>
       request<TransferResult>(`/api/calls/${id}/transfer`, { method: 'POST' }),
   },
