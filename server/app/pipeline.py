@@ -133,7 +133,9 @@ class CallPipeline:
     Features:
     - **Interruption handling:** Sends Twilio `clear` when caller speaks during
       TTS playback, discards queued audio.
-    - **Filler phrases:** Plays a pre-cached filler if the LLM takes > 800ms.
+    - **Filler phrases (non-workflow only):** Plays a pre-cached filler if the
+      LLM takes > 1500ms.  Disabled in workflow mode — action nodes have
+      explicit hold messages in the schema instead.
     - **Error recovery:** STT reconnect (1 retry), LLM/TTS fallback messages,
       transfer to fallback number on unrecoverable errors.
     """
@@ -538,23 +540,23 @@ class CallPipeline:
             await self._handle_llm_failure()
 
     async def _generate_engine_response(self, transcript: str) -> None:
-        """Stream a response from the WorkflowEngine with filler and sentence splitting.
+        """Stream a response from the WorkflowEngine with sentence splitting.
 
         Uses the engine's streaming API so TTS can begin as soon as the
         first sentence is generated, rather than waiting for the full response.
+
+        No automatic filler phrases are played in workflow mode.  Action nodes
+        already carry explicit hold messages in the schema (``announcement``,
+        ``integration_message``, ``message``) — those are the designed filler.
+        Adding a generic "one moment please" on top of that is redundant, and
+        for normal node-to-node transitions it is actively annoying.
         """
         buffer = ""
         full_response = ""
         self._interrupted = False
-        first_chunk_received = False
-        filler_task: asyncio.Task[None] | None = None
 
         try:
             assert self._engine is not None
-
-            # Start filler timer while we wait for routing + first LLM tokens
-            if _filler_cache.ready:
-                filler_task = asyncio.create_task(self._play_filler_after_delay())
 
             async for item in self._engine.handle_input_stream(transcript):
                 if self._interrupted:
@@ -562,18 +564,6 @@ class CallPipeline:
 
                 # Handle action results (not streamed — yielded as a single object)
                 if isinstance(item, ActionResult):
-                    if filler_task is not None:
-                        filler_task.cancel()
-                        try:
-                            await filler_task
-                        except asyncio.CancelledError:
-                            pass
-                        filler_task = None
-                    # Clear any playing filler
-                    if self._speaking:
-                        await self._interrupt()
-                        self._interrupted = False
-
                     if item.message:
                         logger.info("Engine action response: %s", item.message)
                         await self._speak(item.message)
@@ -593,21 +583,6 @@ class CallPipeline:
                 # Text chunk from streaming responder
                 chunk = item
 
-                # On first real content: cancel the filler timer (or wait for filler to finish)
-                if not first_chunk_received:
-                    first_chunk_received = True
-                    if filler_task is not None:
-                        filler_task.cancel()
-                        try:
-                            await filler_task
-                        except asyncio.CancelledError:
-                            pass
-                        filler_task = None
-                    # Wait for any playing filler to finish naturally
-                    if self._filler_playing_until > 0:
-                        await self._wait_for_filler()
-                        self._speaking = False
-
                 buffer += chunk
                 full_response += chunk
 
@@ -619,10 +594,6 @@ class CallPipeline:
                     buffer = remainder
                     logger.info("Engine sentence → TTS: %s", sentence)
                     await self._speak(sentence)
-
-            # Cancel filler if engine returned empty
-            if filler_task is not None:
-                filler_task.cancel()
 
             # Flush any remaining text
             if not self._interrupted:
