@@ -31,6 +31,8 @@ Story 0: Decisions (no code)
                               → Story 17: Quickstart wizard & onboarding
                                 → Story 18: Live call monitor & human takeover
                                   → Story 19: Global navigation & UI flow polish
+                    → Story 20: Live call count banner
+                    → Story 21: One-click Google Calendar OAuth
 ```
 
 ---
@@ -1067,6 +1069,116 @@ Additionally, the **config-warnings banner** was checking only the `CALLME_FALLB
 
 - **Web:** `AppShell` renders nav links (Workflows, Calls, Live Calls, Settings). Clicking links navigates correctly. Breadcrumbs render on sub-pages. 404 page renders for unknown routes.
 - **Server:** Config-warnings returns no warnings when `admin_phone_number` is set in the DB (even without `CALLME_FALLBACK_NUMBER` env var).
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.
+
+---
+
+## Story 20 — Live call count banner
+
+As a **Pronto admin**, I want **a persistent banner in the navigation showing how many live calls are active**, so that **I always have visibility into call volume without navigating to the Live Calls page**.
+
+### Background
+
+The `AppShell` component wraps every authenticated page with a shared nav bar. The server already tracks active calls via `EventBus.get_active_calls()`, and the `/ws/calls/live` WebSocket emits `call_started`, `call_ended`, and `snapshot` events. The banner should tap into this real-time data to keep the count accurate.
+
+### Acceptance criteria
+
+- [ ] **Banner appears when active call count ≥ 1.** A coloured banner (e.g. green/blue pill or bar) renders inside `AppShell`, above or beside the nav links, showing the live call count (e.g. "🔴 2 live calls").
+- [ ] **Banner disappears when count drops to 0.** No banner is rendered when there are no active calls.
+- [ ] **Real-time updates.** The banner count updates within ~2 seconds of a call starting or ending, without a full page refresh. Use the existing `/ws/calls/live` WebSocket or a lightweight polling endpoint.
+- [ ] **Clicking the banner navigates to `/calls/live`.** Acts as a shortcut to the Live Calls page.
+- [ ] **Works on every page.** Since the banner is in `AppShell`, it is visible on Home, Workflows, Calls, Phone Numbers, Integrations, Setup, etc.
+- [ ] **Singular/plural grammar.** Shows "1 live call" vs "2 live calls".
+- [ ] **Accessible.** Banner has an `aria-live="polite"` region so screen readers announce count changes.
+
+### Technical notes
+
+- **Approach A (preferred): Lightweight WebSocket in `AppShell`.** Open a shared WS connection to `/ws/calls/live` in `AppShell`. Parse `call_started` / `call_ended` / `snapshot` events to maintain a count. This reuses the existing server-side infrastructure with zero new endpoints.
+- **Approach B: Polling endpoint.** Add `GET /api/calls/live/count` returning `{ count: N }`. Poll every 5s from `AppShell`. Simpler but slightly less real-time.
+- The `LiveCalls` page already connects to the same WS — ensure the two connections don't conflict (or share a context/provider).
+- Add a `data-testid="live-call-banner"` for test targeting.
+
+### Implementation tasks
+
+1. **Server** (if Approach B): Add `GET /api/calls/live/count` endpoint that returns `{ "count": len(event_bus.get_active_calls()) }`.
+2. **Web — `useLiveCallCount` hook or context:** Manages WS connection (or polling) and exposes `count` state.
+3. **Web — `LiveCallBanner` component:** Renders the pill/bar when count ≥ 1. Clicking navigates to `/calls/live`.
+4. **Web — integrate into `AppShell`:** Mount `<LiveCallBanner />` in the nav area.
+5. **Tests:** Hook returns correct count on snapshot/start/end events. Banner renders/hides based on count. Click navigates correctly.
+
+### Unit tests
+
+- **Web:** `LiveCallBanner` renders nothing when count is 0. Renders "1 live call" when count is 1. Renders "3 live calls" when count is 3. Click navigates to `/calls/live`. Banner has `aria-live="polite"`.
+- **Server (if new endpoint):** `/api/calls/live/count` returns correct count.
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.
+
+---
+
+## Story 21 — One-click Google Calendar OAuth setup
+
+As a **Pronto admin**, I want **to connect Google Calendar with a single click instead of manually copying client IDs and secrets**, so that **setting up the calendar integration is fast and error-free**.
+
+### Background
+
+The current Google Calendar integration flow (Story 15) requires the user to:
+1. Go to the Google Cloud Console and create an OAuth 2.0 client.
+2. Copy the `client_id` and `client_secret` into the Integrations form.
+3. Enter a `calendar_id`.
+4. Click a separate "OAuth" button to start the consent flow.
+
+This is tedious and error-prone. The improved flow should store the OAuth client credentials server-side (via environment variables) so the user only needs to click "Connect Google Calendar" and authorize access in the Google consent screen.
+
+### Acceptance criteria
+
+- [ ] **Server-side OAuth client credentials.** The server reads `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from environment variables (or `.env`). These are set once during deployment and shared across all Google Calendar integrations.
+- [ ] **One-click connect button.** On the Integrations page, adding a Google Calendar integration shows a "Connect with Google" button instead of form fields for `client_id` / `client_secret`. The user only provides an optional integration name.
+- [ ] **OAuth redirect flow.** Clicking "Connect with Google" calls a server endpoint that returns the Google OAuth consent URL. The browser redirects (or opens a popup) to that URL. After consent, Google redirects back to the server callback.
+- [ ] **Automatic integration creation.** The OAuth callback creates (or updates) the integration record with the `refresh_token`, `access_token`, and a default `calendar_id` of `"primary"`. The user is redirected back to the Integrations page with a success message.
+- [ ] **Calendar picker (post-connect).** After connecting, the integration card shows the connected calendar name and a dropdown to switch calendars (fetched via the Calendar API using the stored tokens).
+- [ ] **Backwards compatibility.** Existing integrations with manually entered `client_id` / `client_secret` continue to work. The server uses per-integration credentials if present, falling back to the global env vars.
+- [ ] **Graceful degradation.** If `GOOGLE_CLIENT_ID` is not set, the UI falls back to the current manual form (with a message like "Ask your admin to configure Google OAuth credentials").
+- [ ] **Disconnect.** A "Disconnect" button on the integration card revokes the refresh token and clears stored tokens.
+
+### Technical notes
+
+#### Server changes
+
+- **New env vars:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+- **New endpoint: `GET /api/integrations/google/connect`** — Initiates OAuth flow without requiring a pre-existing integration record. Generates a `state` token (CSRF protection), stores it in a short-lived cache or signed cookie, and returns `{ url: "https://accounts.google.com/..." }`.
+- **Updated callback: `GET /api/integrations/google/callback`** — Exchanges the auth code for tokens. If no integration exists yet, creates one automatically with `type=google_calendar`, `name="Google Calendar"`, and `calendar_id="primary"`. Stores tokens encrypted. Redirects to the web UI Integrations page (e.g. `/integrations?google=connected`).
+- **New endpoint: `GET /api/integrations/{id}/calendars`** — Lists the user's calendars using the stored access/refresh token, returns `[{ id, summary, primary }]`.
+- **Updated validation:** `_validate_google_calendar_config` should accept integrations without `client_id` when the server has global OAuth credentials.
+- **Token refresh:** When testing / using the integration, prefer per-integration `client_id` if present, otherwise use global env vars for token refresh.
+
+#### Web changes
+
+- **Integrations page:** Detect whether the server has Google OAuth configured (new `GET /api/integrations/google/status` returning `{ configured: bool }`). If configured, show a "Connect with Google" card/button. If not, fall back to manual form.
+- **Post-connect:** After redirect back with `?google=connected`, show a success toast and refresh the list.
+- **Calendar selector:** On the integration card, fetch `/api/integrations/{id}/calendars` and show a dropdown. Default to `primary`.
+- **Remove `client_id` / `client_secret` fields** from the Google Calendar form when server-side OAuth is available.
+
+### Implementation tasks
+
+1. **Server — config:** Add `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` to `config.py`.
+2. **Server — `/api/integrations/google/connect`:** Generate consent URL using server-side credentials, include `state` param.
+3. **Server — `/api/integrations/google/callback`:** Handle code exchange, create/update integration, redirect to web UI.
+4. **Server — `/api/integrations/google/status`:** Return `{ configured: true/false }` based on env vars.
+5. **Server — `/api/integrations/{id}/calendars`:** List calendars using stored tokens.
+6. **Server — update validators & token refresh** to use global credentials as fallback.
+7. **Web — Integrations page:** Add "Connect with Google" button, handle redirect callback, calendar picker.
+8. **Web — remove manual fields** when server-side OAuth is available.
+9. **Tests:** Server endpoint tests, web component tests for both flows.
+
+### Unit tests
+
+- **Server:** `/api/integrations/google/status` returns `{ configured: false }` when env vars missing, `{ configured: true }` when set. `/api/integrations/google/connect` returns a valid Google OAuth URL. OAuth callback creates integration with tokens. `/api/integrations/{id}/calendars` returns calendar list. Existing manual-credential integrations still pass validation.
+- **Web:** "Connect with Google" button renders when server reports `configured: true`. Manual form renders when `configured: false`. Success toast appears on redirect with `?google=connected`. Calendar dropdown renders and updates integration.
 
 ### Blocked until answered
 
