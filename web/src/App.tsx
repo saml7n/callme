@@ -11,7 +11,14 @@ function App() {
     api.auth.configWarnings()
       .then((res) => setWarnings(res.warnings))
       .catch(() => {})
-  }, [])
+
+    // Auto-redirect to setup wizard if not yet configured
+    api.settings.get()
+      .then((res) => {
+        if (!res.configured) navigate('/setup')
+      })
+      .catch(() => {})
+  }, [navigate])
 
   const handleLogout = () => {
     clearToken()
@@ -70,6 +77,12 @@ function App() {
             className="px-5 py-2.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition font-medium"
           >
             Integrations
+          </Link>
+          <Link
+            to="/setup"
+            className="px-5 py-2.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition font-medium"
+          >
+            Setup
           </Link>
         </div>
       </div>

@@ -7,6 +7,9 @@ import type {
   IntegrationTestResult,
   IntegrationType,
   PhoneNumberItem,
+  SettingsResponse,
+  TemplateItem,
+  ValidateResults,
   WorkflowDetail,
   WorkflowGraph,
   WorkflowListItem,
@@ -137,5 +140,22 @@ export const api = {
 
     oauthStart: (id: string) =>
       request<{ url: string }>(`/api/integrations/${id}/oauth/start`),
+  },
+
+  settings: {
+    get: () => request<SettingsResponse>('/api/settings'),
+
+    put: (settings: Record<string, string>) =>
+      request<SettingsResponse>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ settings }),
+      }),
+
+    validate: () =>
+      request<ValidateResults>('/api/settings/validate', { method: 'POST' }),
+  },
+
+  templates: {
+    list: () => request<TemplateItem[]>('/api/templates'),
   },
 }

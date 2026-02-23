@@ -12,12 +12,14 @@ import CallList from './pages/CallList'
 import CallDetail from './pages/CallDetail'
 import PhoneNumbers from './pages/PhoneNumbers'
 import Integrations from './pages/Integrations'
+import Setup from './pages/Setup'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/setup" element={<AuthGuard><Setup /></AuthGuard>} />
         <Route path="/" element={<AuthGuard><App /></AuthGuard>} />
         <Route path="/workflows" element={<AuthGuard><WorkflowList /></AuthGuard>} />
         <Route path="/workflows/new" element={<AuthGuard><WorkflowBuilder /></AuthGuard>} />

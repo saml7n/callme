@@ -21,7 +21,7 @@ from openai import (
     RateLimitError,
 )
 
-from app.config import settings
+from app.credentials import get_openai_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class LLMClient:
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
     ) -> None:
-        self._api_key = api_key or settings.openai_api_key
+        self._api_key = api_key or get_openai_api_key()
         self._model = model
         self._max_retries = max_retries
         self._retry_base_delay = retry_base_delay

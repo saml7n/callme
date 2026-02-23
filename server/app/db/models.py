@@ -126,3 +126,22 @@ class CallEvent(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=_utcnow)
     event_type: EventType
     data_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
+# ---------------------------------------------------------------------------
+# Setting (key-value store for API keys & service config)
+# ---------------------------------------------------------------------------
+
+class Setting(SQLModel, table=True):
+    """A key-value setting with encrypted value.
+
+    Used for API keys (Twilio, Deepgram, ElevenLabs, OpenAI) and service
+    configuration (phone numbers, admin phone). Values are Fernet-encrypted
+    at rest.
+    """
+
+    __tablename__ = "settings"
+
+    key: str = Field(primary_key=True)
+    value_encrypted: str = Field(default="", description="Fernet-encrypted value.")
+    updated_at: datetime = Field(default_factory=_utcnow)

@@ -9,6 +9,8 @@ from app.api.auth import router as auth_router
 from app.api.calls import router as calls_router
 from app.api.integrations import router as integrations_router
 from app.api.phone_numbers import router as phone_numbers_router
+from app.api.settings import router as settings_router
+from app.api.templates import router as templates_router
 from app.api.workflows import router as workflows_router
 from app.auth import init_api_key
 from app.db.session import init_db
@@ -28,6 +30,22 @@ async def lifespan(app: FastAPI):
     # Initialize API key (auto-generate if not set)
     api_key = init_api_key()
     logging.getLogger(__name__).info("Auth initialised (key configured: %s)", bool(api_key))
+
+    # Check if settings are configured — warn but don't crash
+    try:
+        from app.db.session import get_session as _get_session
+        from app.api.settings import get_all_settings
+        session = next(_get_session())
+        all_settings = get_all_settings(session)
+        core_keys = ["twilio_account_sid", "deepgram_api_key", "elevenlabs_api_key", "openai_api_key"]
+        missing = [k for k in core_keys if not all_settings.get(k)]
+        if missing:
+            logging.getLogger(__name__).warning(
+                "Missing service settings: %s — run the setup wizard at /setup to configure them.",
+                ", ".join(missing),
+            )
+    except Exception:
+        logging.getLogger(__name__).warning("Could not check settings — database may not be initialised yet.")
 
     # Warm filler phrase cache (best-effort, non-blocking)
     try:
@@ -57,6 +75,8 @@ app.include_router(workflows_router)
 app.include_router(phone_numbers_router)
 app.include_router(calls_router)
 app.include_router(integrations_router)
+app.include_router(settings_router)
+app.include_router(templates_router)
 
 
 @app.get("/health")

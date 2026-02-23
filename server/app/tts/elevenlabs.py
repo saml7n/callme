@@ -13,6 +13,7 @@ from typing import AsyncGenerator
 import httpx
 
 from app.config import settings
+from app.credentials import get_elevenlabs_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class ElevenLabsTTSClient:
         output_format: str = "ulaw_8000",
         optimize_streaming_latency: int = 3,
     ) -> None:
-        self._api_key = api_key or settings.elevenlabs_api_key
+        self._api_key = api_key or get_elevenlabs_api_key()
         self._voice_id = voice_id or settings.elevenlabs_voice_id
         self._model_id = model_id
         self._output_format = output_format

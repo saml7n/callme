@@ -136,3 +136,24 @@ export interface CallDetail {
   status: CallStatus
   events: CallEventItem[]
 }
+
+// ---------------------------------------------------------------------------
+// Settings types (Story 17)
+// ---------------------------------------------------------------------------
+
+export interface SettingsResponse {
+  settings: Record<string, string>
+  configured: boolean
+}
+
+export interface ValidateResults {
+  results: Record<string, string>
+}
+
+export interface TemplateItem {
+  id: string
+  name: string
+  description: string
+  icon: string
+  graph: WorkflowGraph
+}

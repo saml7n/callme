@@ -895,42 +895,42 @@ As a **new user setting up their own instance**, I want **a guided setup wizard 
 ### Acceptance criteria
 
 #### Setup credentials store (server)
-- [ ] New `settings` table: `key` (unique string), `value` (encrypted text), `updated_at`. Used for API keys and service config.
-- [ ] `GET /api/settings` — returns all setting keys with values redacted (shows `••••` + last 4 chars). Never returns full secrets.
-- [ ] `PUT /api/settings` — bulk upsert settings. Accepts: `twilio_account_sid`, `twilio_auth_token`, `deepgram_api_key`, `elevenlabs_api_key`, `openai_api_key`, `admin_phone_number`.
-- [ ] `POST /api/settings/validate` — tests each configured service:
+- [x] New `settings` table: `key` (unique string), `value` (encrypted text), `updated_at`. Used for API keys and service config.
+- [x] `GET /api/settings` — returns all setting keys with values redacted (shows `••••` + last 4 chars). Never returns full secrets.
+- [x] `PUT /api/settings` — bulk upsert settings. Accepts: `twilio_account_sid`, `twilio_auth_token`, `deepgram_api_key`, `elevenlabs_api_key`, `openai_api_key`, `admin_phone_number`.
+- [x] `POST /api/settings/validate` — tests each configured service:
   - Twilio: `GET /2010-04-01/Accounts/{sid}` → valid account.
   - Deepgram: `GET /v1/projects` → valid key.
   - ElevenLabs: `GET /v1/voices` → valid key.
   - OpenAI: `GET /v1/models` → valid key.
   - Returns per-service status: `{ "twilio": "ok", "deepgram": "ok", ... }`.
-- [ ] On server startup, if settings are missing, the pipeline logs a clear warning but doesn't crash. The quickstart wizard is the intended path to configure them.
-- [ ] `admin_phone_number` — the admin's mobile number for receiving live-call alerts (Story 18).
-- [ ] All runtime code (STT, TTS, LLM, Twilio clients) reads credentials from the settings store instead of (or falling back to) environment variables. Env vars take precedence if set (for Docker/CI).
+- [x] On server startup, if settings are missing, the pipeline logs a clear warning but doesn't crash. The quickstart wizard is the intended path to configure them.
+- [x] `admin_phone_number` — the admin's mobile number for receiving live-call alerts (Story 18).
+- [x] All runtime code (STT, TTS, LLM, Twilio clients) reads credentials from the settings store instead of (or falling back to) environment variables. Env vars take precedence if set (for Docker/CI).
 
 #### Web — Quickstart wizard
-- [ ] First visit to the app (no settings configured) auto-redirects to `/setup`.
-- [ ] The wizard is a multi-step form:
+- [x] First visit to the app (no settings configured) auto-redirects to `/setup`.
+- [x] The wizard is a multi-step form:
   1. **Welcome** — "Welcome to CallMe! Let's get your AI receptionist running." Overview of what's needed.
   2. **API Keys** — fields for Twilio SID + Auth Token, Deepgram key, ElevenLabs key, OpenAI key. Each field has a "Where do I find this?" expandable hint with a direct link to the provider's dashboard. A "Validate All" button tests each key and shows green ✓ / red ✗ per service.
   3. **Phone Number** — "Enter the Twilio phone number you want to use" (E.164). Validates it belongs to the Twilio account. Also: "Enter your mobile number" for admin alerts. Explains: "We'll text you when a live call comes in."
   4. **First Workflow** — Choose from a template gallery (2-3 starter templates: "Simple Receptionist", "Appointment Booking", "FAQ Bot") or "Start from scratch". Selecting a template pre-populates the workflow builder.
   5. **Publish & Test** — One-click publish to the phone number from step 3. Shows: "Call {number} now to test!" with a live status indicator.
-- [ ] Progress bar across the top. Steps can be revisited. Settings are saved incrementally (not all-or-nothing).
-- [ ] After completing setup, subsequent visits go to the dashboard (workflow list). A "Setup" link in the nav allows re-running the wizard.
+- [x] Progress bar across the top. Steps can be revisited. Settings are saved incrementally (not all-or-nothing).
+- [x] After completing setup, subsequent visits go to the dashboard (workflow list). A "Setup" link in the nav allows re-running the wizard.
 
 #### Starter templates
-- [ ] Templates stored as JSON files in `schemas/templates/`.
-- [ ] `GET /api/templates` — returns list of available templates with name, description, and preview image/icon.
-- [ ] Selecting a template in the wizard or workflow list creates a new workflow pre-populated with the template's graph.
+- [x] Templates stored as JSON files in `schemas/templates/`.
+- [x] `GET /api/templates` — returns list of available templates with name, description, and preview image/icon.
+- [x] Selecting a template in the wizard or workflow list creates a new workflow pre-populated with the template's graph.
 
 #### Documentation
-- [ ] `README.md` updated with:
+- [x] `README.md` updated with:
   - Prerequisites (accounts needed: Twilio, Deepgram, ElevenLabs, OpenAI).
   - Links to sign up for each service (free tiers where applicable).
   - "Get Started" section: `git clone`, `docker compose up`, open `http://localhost:5173`, follow the wizard.
   - Environment variable reference (still supported as override).
-- [ ] In-app: every API key field has a tooltip/link explaining where to get the key.
+- [x] In-app: every API key field has a tooltip/link explaining where to get the key.
 
 ### Unit tests
 - **Settings API:** PUT saves settings. GET returns redacted values. Validate returns per-service status (mock HTTP). Missing key → validate returns `"not_configured"`.
@@ -952,8 +952,20 @@ As a **new user setting up their own instance**, I want **a guided setup wizard 
 2. Docker Compose setup: single `docker compose up` for server + web + SQLite, or separate services?
 
 **Recorded answers:**
-- Templates: _unanswered_
-- Docker: _unanswered_
+- Templates: Read-only starting points. Selecting a template creates a new editable workflow copy; the original template JSON on disk is never modified.
+- Docker: Single `docker compose up` — one command launches server + web + SQLite (simplest quickstart).
+
+### Completion
+- **Unit tests:** 15 new server tests (283 total), 13 new web tests (67 total) — all passing.
+- **QA verification (browser — MCP Playwright):**
+  1. ✅ Fresh database → login → auto-redirected to `/setup`. Welcome page renders with all overview items.
+  2. ✅ API Keys step shows 5 fields with "Where do I find this?" expandable hints + dashboard links. Validate All returns `not_configured` for empty keys (verified via API). Real-key validation requires actual service accounts.
+  3. ✅ Phone Number step: entered +15551234567 (Twilio) and +15559876543 (admin). Save & Continue auto-advanced to step 4. Settings stored and redacted correctly.
+  4. ✅ First Workflow step: 3 templates displayed (Appointment Booking, FAQ Bot, Simple Receptionist) + "Start from Scratch". Selected Simple Receptionist → "Use This Template" → workflow created with success message.
+  5. ✅ Publish & Test step: shows workflow name + phone number. Published successfully → "Your AI receptionist is live! Call +15551234567 now to test!" with active pulse indicator.
+  6. ✅ "Go to Dashboard" → navigated to `/workflows` showing "Simple Receptionist" (v1, Active, +15551234567). With `configured: true`, visiting `/` stays on home page (no redirect to wizard).
+  7. ✅ "Setup" link in nav → opens wizard with pre-filled redacted values (••••test) in all API key fields.
+- **Commit:** `b1d8c2c`
 
 ---
 

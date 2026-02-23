@@ -1,0 +1,41 @@
+{
+  "id": "wf_faq",
+  "name": "FAQ Bot",
+  "description": "Answers frequently asked questions about your business. A single conversation node that handles all common queries — customise the instructions with your own FAQs.",
+  "version": 1,
+  "entry_node_id": "faq",
+  "nodes": [
+    {
+      "id": "faq",
+      "type": "conversation",
+      "data": {
+        "instructions": "You are a friendly FAQ assistant for a business. Answer common questions concisely and helpfully. If you don't know the answer, let the caller know you'll have someone get back to them. Topics you can help with: business hours (Monday-Friday 9am-5pm), location (123 Main Street), services offered, pricing, and general policies. Keep responses to 1-2 sentences.",
+        "examples": [
+          { "role": "user", "content": "What are your hours?" },
+          { "role": "assistant", "content": "We're open Monday to Friday, 9am to 5pm. Is there anything else you'd like to know?" },
+          { "role": "user", "content": "Where are you located?" },
+          { "role": "assistant", "content": "We're at 123 Main Street. Would you like directions or anything else?" }
+        ],
+        "max_iterations": 20
+      },
+      "position": { "x": 100, "y": 100 }
+    },
+    {
+      "id": "end_call",
+      "type": "action",
+      "data": {
+        "action_type": "end_call",
+        "message": "Thanks for calling! Have a great day. Goodbye!"
+      },
+      "position": { "x": 100, "y": 350 }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_faq_to_end",
+      "source": "faq",
+      "target": "end_call",
+      "label": "Caller has no more questions and is ready to end the call"
+    }
+  ]
+}

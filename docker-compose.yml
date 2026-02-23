@@ -1,0 +1,29 @@
+# CallMe — single-command quickstart
+# Usage: docker compose up --build
+
+services:
+  server:
+    build: ./server
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:///./data/callme.db
+    volumes:
+      - callme-data:/app/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  callme-data:

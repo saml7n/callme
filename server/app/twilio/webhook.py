@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 
 from app.config import settings
+from app.credentials import get_twilio_auth_token
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def validate_twilio_signature(request_url: str, params: dict, signature: str) ->
     Returns True if validation passes or if no auth token is configured
     (skip validation in development).
     """
-    auth_token = settings.twilio_auth_token
+    auth_token = get_twilio_auth_token()
     if not auth_token:
         logger.debug("No twilio_auth_token configured — skipping signature validation")
         return True

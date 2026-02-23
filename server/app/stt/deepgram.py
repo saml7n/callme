@@ -17,7 +17,7 @@ import websockets
 import websockets.asyncio.client
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
-from app.config import settings
+from app.credentials import get_deepgram_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class DeepgramSTTClient:
         smart_format: bool = True,
         interim_results: bool = True,
     ) -> None:
-        self._api_key = api_key or settings.deepgram_api_key
+        self._api_key = api_key or get_deepgram_api_key()
         self._model = model
         self._encoding = encoding
         self._sample_rate = sample_rate
