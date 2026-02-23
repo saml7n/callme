@@ -152,7 +152,7 @@ class TestTwilioSignatureValidation:
         """When twilio_auth_token is empty, validation passes."""
         from app.twilio.webhook import validate_twilio_signature
 
-        monkeypatch.setattr("app.twilio.webhook.settings.twilio_auth_token", "")
+        monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
         assert validate_twilio_signature("http://example.com", {}, "") is True
 
     def test_invalid_signature_fails(self, monkeypatch):
@@ -160,7 +160,7 @@ class TestTwilioSignatureValidation:
         from app.twilio.webhook import validate_twilio_signature
 
         monkeypatch.setattr(
-            "app.twilio.webhook.settings.twilio_auth_token", "test-auth-token"
+            "app.twilio.webhook.get_twilio_auth_token", lambda: "test-auth-token"
         )
         assert (
             validate_twilio_signature("http://example.com", {}, "bad-signature")
@@ -175,7 +175,7 @@ class TestTwilioSignatureValidation:
 
         auth_token = "my-secret-token"
         monkeypatch.setattr(
-            "app.twilio.webhook.settings.twilio_auth_token", auth_token
+            "app.twilio.webhook.get_twilio_auth_token", lambda: auth_token
         )
 
         # Generate a correct signature using the same validator

@@ -34,6 +34,8 @@ router = APIRouter(
 # Allowed setting keys
 ALLOWED_KEYS = {
     "twilio_account_sid",
+    "twilio_api_key_sid",
+    "twilio_api_key_secret",
     "twilio_auth_token",
     "twilio_phone_number",
     "deepgram_api_key",
@@ -158,15 +160,26 @@ async def validate_settings(
     all_settings = get_all_settings(session)
     results: dict[str, str] = {}
 
-    # Twilio
+    # Twilio — supports API Key (SID+Secret) or Auth Token for REST auth
     twilio_sid = all_settings.get("twilio_account_sid", "")
-    twilio_token = all_settings.get("twilio_auth_token", "")
-    if twilio_sid and twilio_token:
+    twilio_key_sid = all_settings.get("twilio_api_key_sid", "")
+    twilio_key_secret = all_settings.get("twilio_api_key_secret", "")
+    twilio_auth_token = all_settings.get("twilio_auth_token", "")
+
+    # Prefer API Key, fall back to Auth Token
+    if twilio_sid and twilio_key_sid and twilio_key_secret:
+        auth_pair = (twilio_key_sid, twilio_key_secret)
+    elif twilio_sid and twilio_auth_token:
+        auth_pair = (twilio_sid, twilio_auth_token)
+    else:
+        auth_pair = None
+
+    if twilio_sid and auth_pair:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}.json",
-                    auth=(twilio_sid, twilio_token),
+                    f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Calls.json?PageSize=1",
+                    auth=auth_pair,
                     timeout=10.0,
                 )
                 results["twilio"] = "ok" if resp.status_code == 200 else f"error ({resp.status_code})"
@@ -191,15 +204,17 @@ async def validate_settings(
     else:
         results["deepgram"] = "not_configured"
 
-    # ElevenLabs
+    # ElevenLabs — use a tiny TTS request instead of GET /v1/voices
+    # because scoped API keys may lack voices_read permission.
     el_key = all_settings.get("elevenlabs_api_key", "")
     if el_key:
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    "https://api.elevenlabs.io/v1/voices",
-                    headers={"xi-api-key": el_key},
-                    timeout=10.0,
+                resp = await client.post(
+                    "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM",
+                    headers={"xi-api-key": el_key, "Content-Type": "application/json"},
+                    json={"text": "ok", "model_id": "eleven_flash_v2_5"},
+                    timeout=15.0,
                 )
                 results["elevenlabs"] = "ok" if resp.status_code == 200 else f"error ({resp.status_code})"
         except Exception as exc:

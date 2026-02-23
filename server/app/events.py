@@ -28,6 +28,8 @@ class EventBus:
         self._listeners: list[asyncio.Queue[dict[str, Any]]] = []
         # Active calls: call_id → metadata dict
         self._active_calls: dict[str, dict[str, Any]] = {}
+        # Transcript history per active call: call_id → list of transcript dicts
+        self._transcripts: dict[str, list[dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
     # Active call registry
@@ -49,6 +51,7 @@ class EventBus:
             "started_at": time.time(),
         }
         self._active_calls[call_id] = meta
+        self._transcripts[call_id] = []
         self.emit({
             "type": "call_started",
             "call_id": call_id,
@@ -61,6 +64,7 @@ class EventBus:
     def unregister_call(self, call_id: str, duration: float | None = None) -> None:
         """Remove a call from active set and broadcast ``call_ended``."""
         self._active_calls.pop(call_id, None)
+        self._transcripts.pop(call_id, None)
         self.emit({
             "type": "call_ended",
             "call_id": call_id,
@@ -70,8 +74,12 @@ class EventBus:
         logger.info("Call unregistered: %s (active=%d)", call_id, len(self._active_calls))
 
     def get_active_calls(self) -> list[dict[str, Any]]:
-        """Return a snapshot of all currently active calls."""
-        return list(self._active_calls.values())
+        """Return a snapshot of all currently active calls with transcripts."""
+        result = []
+        for call_id, meta in self._active_calls.items():
+            entry = {**meta, "transcript": list(self._transcripts.get(call_id, []))}
+            result.append(entry)
+        return result
 
     def get_call_sid(self, call_id: str) -> str | None:
         """Return the Twilio call_sid for an active call, or None."""
@@ -102,6 +110,15 @@ class EventBus:
 
     def emit(self, event: dict[str, Any]) -> None:
         """Broadcast an event to all subscribers. Non-blocking — drops if full."""
+        # Store transcript events for replay on new connections
+        if event.get("type") == "transcript":
+            call_id = event.get("call_id")
+            if call_id and call_id in self._transcripts:
+                self._transcripts[call_id].append({
+                    "role": event.get("role", ""),
+                    "text": event.get("text", ""),
+                    "timestamp": event.get("timestamp", 0),
+                })
         for q in self._listeners:
             try:
                 q.put_nowait(event)

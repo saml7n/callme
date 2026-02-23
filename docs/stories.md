@@ -30,6 +30,7 @@ Story 0: Decisions (no code)
                             → Story 16: Integration picker panel for action nodes
                               → Story 17: Quickstart wizard & onboarding
                                 → Story 18: Live call monitor & human takeover
+                                  → Story 19: Global navigation & UI flow polish
 ```
 
 ---
@@ -1020,3 +1021,53 @@ As an **admin**, I want **to see when a call is active, read the live transcript
   - `web/src/lib/types.ts` — LiveCallEvent, ActiveCall, TranscriptMessage, TransferResult
   - `web/src/lib/api.ts` — calls.live(), calls.transfer()
   - `web/src/test/liveCalls.test.tsx` (new) — 11 tests
+
+---
+
+## Story 19 — Global navigation & UI flow polish
+
+As a **user**, I want **consistent navigation across every page** so that **I can always get to where I need to go without using the browser back button or editing the URL**.
+
+### Context
+
+An audit of the current UI revealed significant navigation gaps:
+
+- **WorkflowPreview** is a complete dead end — "Pronto" is plain text (not a link) and there are no other navigation elements.
+- **Setup** wizard has no escape — no home link, no sign-out, only internal back/next buttons.
+- **WorkflowBuilder** only links home — no breadcrumb back to the workflow list.
+- **Integrations** page uses a completely different nav pattern ("← Home" text link instead of the header bar every other page uses).
+- **No global nav** — every page re-implements its own header with a different combination of links, making the experience inconsistent.
+- **Settings pages** (Phone Numbers and Integrations) have no cross-links between each other.
+- **CallList** has no link to Live Calls, even though they're sibling pages.
+- **No 404 page** — unknown routes render blank.
+
+Additionally, the **config-warnings banner** was checking only the `CALLME_FALLBACK_NUMBER` env var, ignoring the `admin_phone_number` saved through the Setup wizard — so the "no fallback number" warning persisted even after setup. (Fixed as a pre-requisite.)
+
+### Acceptance criteria
+
+- [ ] **Shared `AppShell` layout component** wrapping all authenticated routes. Contains:
+  - Left: "Pronto" logo/text → links to `/` (home dashboard).
+  - Centre/right: Top-level nav links — **Workflows**, **Calls**, **Live Calls**, **Settings** (dropdown or group for Phone Numbers + Integrations).
+  - Far right: "Setup" gear icon (→ `/setup`), Sign Out button.
+- [ ] **Breadcrumbs** on every sub-page (e.g. `Workflows › Edit: "My Flow"`, `Calls › Detail`).
+- [ ] **WorkflowBuilder** header includes a "← Workflows" back link.
+- [ ] **WorkflowPreview** header includes a "← Back" link (to previous page or `/workflows`).
+- [ ] **Setup** page gets an `✕ Close` / Home icon in the top-right (navigates to `/` or `/workflows`).
+- [ ] **Integrations** page uses the same `AppShell` header as every other page (remove the custom "← Home" pattern).
+- [ ] **Catch-all 404 route** that renders a "Page not found" message with a link home.
+- [ ] Every page is reachable within **≤ 2 clicks** from any other page (via the shared nav bar).
+
+### Reachability matrix (target state)
+
+| From \ To | Home | Workflows | WF Builder | WF Preview | Live Calls | Calls | Call Detail | Phone Numbers | Integrations | Setup |
+|-----------|------|-----------|------------|------------|------------|-------|-------------|---------------|--------------|-------|
+| **Any page** | nav | nav | via Workflows | via WF list | nav | nav | via Calls | nav/Settings | nav/Settings | nav |
+
+### Unit tests
+
+- **Web:** `AppShell` renders nav links (Workflows, Calls, Live Calls, Settings). Clicking links navigates correctly. Breadcrumbs render on sub-pages. 404 page renders for unknown routes.
+- **Server:** Config-warnings returns no warnings when `admin_phone_number` is set in the DB (even without `CALLME_FALLBACK_NUMBER` env var).
+
+### Blocked until answered
+
+- None — all decisions can be made during implementation.

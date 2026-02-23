@@ -747,17 +747,30 @@ class CallPipeline:
 
     async def _speak_via_twilio_say(self, text: str) -> None:
         """Fall back to Twilio REST API <Say> when TTS is unavailable."""
-        from app.config import settings
+        from app.credentials import (
+            get_twilio_account_sid,
+            get_twilio_api_key_secret,
+            get_twilio_api_key_sid,
+            get_twilio_auth_token,
+        )
 
         if not self._call_sid:
             logger.error("Cannot use Twilio <Say>: no call_sid")
             return
 
-        account_sid = settings.twilio_account_sid
-        api_key_sid = settings.twilio_api_key_sid
-        api_key_secret = settings.twilio_api_key_secret
+        account_sid = get_twilio_account_sid()
+        api_key_sid = get_twilio_api_key_sid()
+        api_key_secret = get_twilio_api_key_secret()
+        auth_token = get_twilio_auth_token()
 
-        if not all([account_sid, api_key_sid, api_key_secret]):
+        if api_key_sid and api_key_secret:
+            auth_pair = (api_key_sid, api_key_secret)
+        elif auth_token:
+            auth_pair = (account_sid, auth_token)
+        else:
+            auth_pair = None
+
+        if not account_sid or not auth_pair:
             logger.error("Cannot use Twilio <Say>: missing credentials")
             return
 
@@ -776,7 +789,7 @@ class CallPipeline:
                 resp = await client.post(
                     url,
                     data={"Twiml": twiml},
-                    auth=(api_key_sid, api_key_secret),
+                    auth=auth_pair,
                 )
                 if resp.status_code < 300:
                     logger.info("Twilio <Say> fallback succeeded for: %s", text)
@@ -812,7 +825,12 @@ class CallPipeline:
 
     async def _handle_transfer(self, target_number: str) -> None:
         """Transfer the call to another number via Twilio REST API."""
-        from app.config import settings
+        from app.credentials import (
+            get_twilio_account_sid,
+            get_twilio_api_key_secret,
+            get_twilio_api_key_sid,
+            get_twilio_auth_token,
+        )
 
         logger.info("Transfer action — dialling %s via Twilio REST API", target_number)
 
@@ -820,11 +838,19 @@ class CallPipeline:
             logger.error("Cannot transfer: no call_sid available")
             return
 
-        account_sid = settings.twilio_account_sid
-        api_key_sid = settings.twilio_api_key_sid
-        api_key_secret = settings.twilio_api_key_secret
+        account_sid = get_twilio_account_sid()
+        api_key_sid = get_twilio_api_key_sid()
+        api_key_secret = get_twilio_api_key_secret()
+        auth_token = get_twilio_auth_token()
 
-        if not all([account_sid, api_key_sid, api_key_secret]):
+        if api_key_sid and api_key_secret:
+            auth_pair = (api_key_sid, api_key_secret)
+        elif auth_token:
+            auth_pair = (account_sid, auth_token)
+        else:
+            auth_pair = None
+
+        if not account_sid or not auth_pair:
             logger.error("Cannot transfer: missing Twilio credentials")
             return
 
@@ -843,7 +869,7 @@ class CallPipeline:
                 resp = await client.post(
                     url,
                     data={"Twiml": twiml},
-                    auth=(api_key_sid, api_key_secret),
+                    auth=auth_pair,
                 )
                 if resp.status_code < 300:
                     logger.info("Transfer initiated to %s (status=%d)", target_number, resp.status_code)

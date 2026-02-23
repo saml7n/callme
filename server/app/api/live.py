@@ -16,8 +16,13 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.auth import require_auth
-from app.config import settings
-from app.credentials import get_twilio_account_sid, get_admin_phone_number
+from app.credentials import (
+    get_admin_phone_number,
+    get_twilio_account_sid,
+    get_twilio_api_key_secret,
+    get_twilio_api_key_sid,
+    get_twilio_auth_token,
+)
 from app.events import event_bus
 
 logger = logging.getLogger(__name__)
@@ -94,13 +99,20 @@ async def transfer_call(call_id: UUID) -> dict:
     if not call_sid:
         raise HTTPException(status_code=404, detail="Call SID not available")
 
-    # Build Twilio credentials
+    # Build Twilio credentials — prefer API Key, fall back to Auth Token
     account_sid = get_twilio_account_sid()
-    # Use API key or auth token for REST auth
-    api_key_sid = settings.twilio_api_key_sid
-    api_key_secret = settings.twilio_api_key_secret
+    api_key_sid = get_twilio_api_key_sid()
+    api_key_secret = get_twilio_api_key_secret()
+    auth_token = get_twilio_auth_token()
 
-    if not account_sid or not (api_key_sid and api_key_secret):
+    if api_key_sid and api_key_secret:
+        auth_pair = (api_key_sid, api_key_secret)
+    elif auth_token:
+        auth_pair = (account_sid, auth_token)
+    else:
+        auth_pair = None
+
+    if not account_sid or not auth_pair:
         raise HTTPException(status_code=500, detail="Twilio credentials not configured")
 
     # Build TwiML to dial the admin
@@ -118,7 +130,7 @@ async def transfer_call(call_id: UUID) -> dict:
             resp = await client.post(
                 url,
                 data={"Twiml": twiml},
-                auth=(api_key_sid, api_key_secret),
+                auth=auth_pair,
             )
             if resp.status_code >= 300:
                 logger.error("Twilio transfer failed (%d): %s", resp.status_code, resp.text)

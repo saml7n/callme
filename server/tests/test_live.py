@@ -208,11 +208,10 @@ class TestTransferAPI:
             with (
                 patch("app.api.live.get_admin_phone_number", return_value="+447999000111"),
                 patch("app.api.live.get_twilio_account_sid", return_value="AC_test"),
-                patch("app.api.live.settings") as mock_settings,
+                patch("app.api.live.get_twilio_api_key_sid", return_value="SK_test"),
+                patch("app.api.live.get_twilio_api_key_secret", return_value="secret"),
                 patch("httpx.AsyncClient") as mock_httpx,
             ):
-                mock_settings.twilio_api_key_sid = "SK_test"
-                mock_settings.twilio_api_key_secret = "secret"
                 mock_httpx.return_value.__aenter__ = AsyncMock(return_value=MagicMock(
                     post=AsyncMock(return_value=mock_resp)
                 ))

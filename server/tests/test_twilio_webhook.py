@@ -15,6 +15,8 @@ async def test_incoming_returns_twiml_xml(monkeypatch):
     from app.config import Settings
 
     monkeypatch.setattr("app.twilio.webhook.settings", Settings())
+    # Ensure signature validation is skipped (no auth token)
+    monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -38,6 +40,8 @@ async def test_incoming_converts_http_to_ws(monkeypatch):
     from app.config import Settings
 
     monkeypatch.setattr("app.twilio.webhook.settings", Settings())
+    # Ensure signature validation is skipped (no auth token)
+    monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

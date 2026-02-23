@@ -33,6 +33,7 @@ export default function LiveCalls() {
   const [transferring, setTransferring] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const unmountedRef = useRef(false)
 
   // Timer tick for elapsed time
   const [, setTick] = useState(0)
@@ -42,6 +43,13 @@ export default function LiveCalls() {
   }, [])
 
   const connectWs = useCallback(() => {
+    // Close any existing connection first to avoid duplicates
+    if (wsRef.current) {
+      wsRef.current.onclose = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
     const token = getToken()
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = import.meta.env.VITE_API_URL
@@ -55,8 +63,10 @@ export default function LiveCalls() {
     ws.onopen = () => setConnected(true)
     ws.onclose = () => {
       setConnected(false)
-      // Reconnect after 3s
-      reconnectRef.current = setTimeout(connectWs, 3000)
+      // Don't reconnect if we've been unmounted
+      if (!unmountedRef.current) {
+        reconnectRef.current = setTimeout(connectWs, 3000)
+      }
     }
     ws.onerror = () => ws.close()
 
@@ -76,10 +86,20 @@ export default function LiveCalls() {
 
       switch (event.type) {
         case 'snapshot': {
-          // Initial state — merge any calls we don't have yet
+          // Initial state — hydrate active calls with their transcripts
           for (const c of event.calls ?? []) {
-            if (!next[c.call_id]) {
-              next[c.call_id] = { call: c, transcript: [], transferred: false, ended: false }
+            const existingTranscript = (c as Record<string, unknown>).transcript as
+              | { role: string; text: string; timestamp: number }[]
+              | undefined
+            next[c.call_id] = {
+              call: c,
+              transcript: existingTranscript?.map((t) => ({
+                role: t.role as 'caller' | 'ai',
+                text: t.text,
+                timestamp: t.timestamp,
+              })) ?? [],
+              transferred: false,
+              ended: false,
             }
           }
           break
@@ -143,14 +163,20 @@ export default function LiveCalls() {
   }, [])
 
   useEffect(() => {
+    unmountedRef.current = false
     connectWs()
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
     return () => {
+      unmountedRef.current = true
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
-      wsRef.current?.close()
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+        wsRef.current = null
+      }
     }
   }, [connectWs])
 

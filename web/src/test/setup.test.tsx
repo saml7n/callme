@@ -16,6 +16,8 @@ vi.mock('@/lib/api', () => ({
       list: vi.fn(),
     },
     workflows: {
+      list: vi.fn(),
+      get: vi.fn(),
       create: vi.fn(),
       publish: vi.fn(),
     },
@@ -71,6 +73,7 @@ beforeEach(() => {
   ;(api.settings.get as Mock).mockResolvedValue({ settings: {}, configured: false })
   ;(api.templates.list as Mock).mockResolvedValue(mockTemplates)
   ;(api.phoneNumbers.list as Mock).mockResolvedValue([])
+  ;(api.workflows.list as Mock).mockResolvedValue([])
 })
 
 // ===========================================================================
@@ -114,7 +117,8 @@ describe('API Keys step', () => {
   it('renders all API key input fields', async () => {
     await goToStep2()
     expect(screen.getByLabelText('Twilio Account SID')).toBeInTheDocument()
-    expect(screen.getByLabelText('Twilio Auth Token')).toBeInTheDocument()
+    expect(screen.getByLabelText('Twilio API Key SID')).toBeInTheDocument()
+    expect(screen.getByLabelText('Twilio API Key Secret')).toBeInTheDocument()
     expect(screen.getByLabelText('Deepgram API Key')).toBeInTheDocument()
     expect(screen.getByLabelText('ElevenLabs API Key')).toBeInTheDocument()
     expect(screen.getByLabelText('OpenAI API Key')).toBeInTheDocument()

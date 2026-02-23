@@ -47,16 +47,18 @@ async def config_warnings() -> dict:
     Protected by auth (callers must be logged in).
     """
     from app.config import settings
+    from app.credentials import get_admin_phone_number
 
     warnings: list[str] = []
-    if not settings.callme_fallback_number:
+    if not settings.callme_fallback_number and not get_admin_phone_number():
         warnings.append(
-            "No fallback phone number configured. Set CALLME_FALLBACK_NUMBER "
-            "so calls can be transferred to a human when errors occur."
+            "No fallback phone number configured. Enter your mobile number in "
+            "Setup → Phone Number, or set CALLME_FALLBACK_NUMBER in your .env."
         )
-    if not settings.twilio_auth_token:
+    if not settings.twilio_auth_token and not (settings.twilio_api_key_sid and settings.twilio_api_key_secret):
         warnings.append(
-            "No Twilio auth token configured. Set TWILIO_AUTH_TOKEN to enable "
-            "webhook signature validation."
+            "No Twilio auth credentials configured. Set TWILIO_API_KEY_SID + "
+            "TWILIO_API_KEY_SECRET (or TWILIO_AUTH_TOKEN) to enable API calls "
+            "and webhook signature validation."
         )
     return {"warnings": warnings}

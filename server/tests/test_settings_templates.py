@@ -126,6 +126,7 @@ class TestSettingsValidate:
             with patch("app.api.settings.httpx.AsyncClient") as MockClient:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.post = AsyncMock(return_value=mock_response)
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 MockClient.return_value = mock_client
@@ -153,6 +154,7 @@ class TestSettingsValidate:
             with patch("app.api.settings.httpx.AsyncClient") as MockClient:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.post = AsyncMock(return_value=mock_response)
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
                 MockClient.return_value = mock_client

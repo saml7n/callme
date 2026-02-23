@@ -24,10 +24,17 @@ const API_KEY_FIELDS = [
     service: 'twilio',
   },
   {
-    key: 'twilio_auth_token',
-    label: 'Twilio Auth Token',
-    hint: 'Revealed on the Twilio Console under Account SID',
-    link: 'https://console.twilio.com/',
+    key: 'twilio_api_key_sid',
+    label: 'Twilio API Key SID',
+    hint: 'Create one at Account → API keys & tokens in the Twilio Console',
+    link: 'https://console.twilio.com/us1/account/keys-credentials/api-keys',
+    service: 'twilio',
+  },
+  {
+    key: 'twilio_api_key_secret',
+    label: 'Twilio API Key Secret',
+    hint: 'Shown once when you create the API key — paste it here',
+    link: 'https://console.twilio.com/us1/account/keys-credentials/api-keys',
     service: 'twilio',
   },
   {
@@ -77,31 +84,58 @@ export default function Setup() {
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
 
-  // Load existing settings on mount
+  // Load existing settings on mount — pre-fill fields and auto-validate if keys exist
   useEffect(() => {
-    api.settings.get().then((res) => {
-      // Pre-fill any already-configured values (redacted)
-      const existing: Record<string, string> = {}
-      for (const [k, v] of Object.entries(res.settings)) {
-        if (v) existing[k] = v
+    let cancelled = false
+
+    async function hydrate() {
+      try {
+        // 1. Load settings and pre-fill fields
+        const res = await api.settings.get()
+        if (cancelled) return
+        const existing: Record<string, string> = {}
+        for (const [k, v] of Object.entries(res.settings)) {
+          if (v) existing[k] = v
+        }
+        setSettings((prev) => ({ ...existing, ...prev }))
+
+        // Pre-fill phone numbers from saved settings
+        if (existing.twilio_phone_number) setTwilioPhone((p) => p || existing.twilio_phone_number)
+        if (existing.admin_phone_number) setAdminPhone((p) => p || existing.admin_phone_number)
+
+        // If API keys are configured, auto-validate so the user can skip through
+        if (res.configured) {
+          setValidating(true)
+          try {
+            const v = await api.settings.validate()
+            if (!cancelled) setValidation(v.results)
+          } finally {
+            if (!cancelled) setValidating(false)
+          }
+        }
+
+        // 2. Load phone numbers (for step 5)
+        const phones = await api.phoneNumbers.list()
+        if (!cancelled) setPhoneNumbers(phones)
+
+        // 3. Load existing workflows — resume step 4/5 if one already exists
+        const workflows = await api.workflows.list()
+        if (!cancelled && workflows.length > 0) {
+          const wf = await api.workflows.get(workflows[0].id)
+          if (!cancelled) setCreatedWorkflow(wf)
+        }
+
+        // 4. Load templates (for step 4)
+        const tmpls = await api.templates.list()
+        if (!cancelled) setTemplates(tmpls)
+      } catch {
+        // ignore — offline or server not started yet
       }
-      setSettings((prev) => ({ ...existing, ...prev }))
-    }).catch(() => {})
+    }
+
+    hydrate()
+    return () => { cancelled = true }
   }, [])
-
-  // Load templates when reaching step 4
-  useEffect(() => {
-    if (step === 3) {
-      api.templates.list().then(setTemplates).catch(() => {})
-    }
-  }, [step])
-
-  // Load phone numbers when reaching step 5
-  useEffect(() => {
-    if (step === 4) {
-      api.phoneNumbers.list().then(setPhoneNumbers).catch(() => {})
-    }
-  }, [step])
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
@@ -206,7 +240,13 @@ export default function Setup() {
   const canProceedStep = (s: number): boolean => {
     switch (s) {
       case 0: return true // Welcome
-      case 1: return Object.values(validation).some((v) => v === 'ok') // At least one key validated
+      case 1: {
+        // Allow proceeding if validation passed OR if all core keys are already saved (redacted)
+        const validated = Object.values(validation).some((v) => v === 'ok')
+        const coreKeys = ['twilio_account_sid', 'deepgram_api_key', 'elevenlabs_api_key', 'openai_api_key']
+        const allConfigured = coreKeys.every((k) => settings[k] && settings[k].length > 0)
+        return validated || allConfigured
+      }
       case 2: return !!twilioPhone
       case 3: return createdWorkflow !== null
       case 4: return true
@@ -300,11 +340,17 @@ export default function Setup() {
             </div>
 
             <div className="space-y-4">
-              {API_KEY_FIELDS.map((field) => (
+              {API_KEY_FIELDS.map((field) => {
+                const val = settings[field.key] ?? ''
+                const isRedacted = val.startsWith('••••')
+                return (
                 <div key={field.key} className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label htmlFor={field.key}>{field.label}</Label>
                     <div className="flex items-center gap-2">
+                      {isRedacted && !validation[field.service] && (
+                        <Badge className="bg-gray-800 text-gray-400 border-gray-700/50">Saved</Badge>
+                      )}
                       {validation[field.service] === 'ok' && (
                         <Badge className="bg-green-900/50 text-green-400 border-green-700/50">✓ Valid</Badge>
                       )}
@@ -313,14 +359,34 @@ export default function Setup() {
                       )}
                     </div>
                   </div>
-                  <Input
-                    id={field.key}
-                    type="password"
-                    placeholder={field.label}
-                    value={settings[field.key] ?? ''}
-                    onChange={(e) => updateSetting(field.key, e.target.value)}
-                    className="bg-gray-900 border-gray-700"
-                  />
+                  {isRedacted ? (
+                    <div className="flex gap-2">
+                      <Input
+                        id={field.key}
+                        type="text"
+                        readOnly
+                        value={val}
+                        className="bg-gray-900 border-gray-700 text-gray-500 flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-gray-700 text-gray-400 shrink-0"
+                        onClick={() => updateSetting(field.key, '')}
+                      >
+                        Change
+                      </Button>
+                    </div>
+                  ) : (
+                    <Input
+                      id={field.key}
+                      type="password"
+                      placeholder={field.label}
+                      value={val}
+                      onChange={(e) => updateSetting(field.key, e.target.value)}
+                      className="bg-gray-900 border-gray-700"
+                    />
+                  )}
                   <button
                     onClick={() => toggleHint(field.key)}
                     className="text-xs text-indigo-400 hover:text-indigo-300 transition"
@@ -336,7 +402,7 @@ export default function Setup() {
                     </div>
                   )}
                 </div>
-              ))}
+              )})}
             </div>
 
             <Button
@@ -367,7 +433,12 @@ export default function Setup() {
                   onChange={(e) => setTwilioPhone(e.target.value)}
                   className="bg-gray-900 border-gray-700"
                 />
-                <p className="text-xs text-gray-500">E.164 format (e.g., +15551234567). This number must belong to your Twilio account.</p>
+                <p className="text-xs text-gray-500">
+                  E.164 format (e.g., +15551234567). This number must belong to your Twilio account.
+                  {twilioPhone.startsWith('••••') && (
+                    <span className="text-indigo-400 ml-1">Already saved — clear and re-enter to change.</span>
+                  )}
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -379,12 +450,23 @@ export default function Setup() {
                   onChange={(e) => setAdminPhone(e.target.value)}
                   className="bg-gray-900 border-gray-700"
                 />
-                <p className="text-xs text-gray-500">We'll text you when a live call comes in. Optional.</p>
+                <p className="text-xs text-gray-500">
+                  We'll text you when a live call comes in. Optional.
+                  {adminPhone.startsWith('••••') && (
+                    <span className="text-indigo-400 ml-1">Already saved — clear and re-enter to change.</span>
+                  )}
+                </p>
               </div>
             </div>
 
             <Button
-              onClick={async () => { await handleSavePhoneNumbers(); nextStep() }}
+              onClick={async () => {
+                // Only save if the user actually entered new values (not redacted)
+                if ((twilioPhone && !twilioPhone.startsWith('••••')) || (adminPhone && !adminPhone.startsWith('••••'))) {
+                  await handleSavePhoneNumbers()
+                }
+                nextStep()
+              }}
               disabled={!twilioPhone || saving}
             >
               {saving ? 'Saving...' : 'Save & Continue'}

@@ -41,6 +41,16 @@ def get_twilio_auth_token() -> str:
     return _from_db("twilio_auth_token") or settings.twilio_auth_token
 
 
+def get_twilio_api_key_sid() -> str:
+    """Return the Twilio API Key SID."""
+    return _from_db("twilio_api_key_sid") or settings.twilio_api_key_sid
+
+
+def get_twilio_api_key_secret() -> str:
+    """Return the Twilio API Key Secret."""
+    return _from_db("twilio_api_key_secret") or settings.twilio_api_key_secret
+
+
 def get_twilio_phone_number() -> str:
     """Return the Twilio phone number."""
     return _from_db("twilio_phone_number") or settings.twilio_phone_number
