@@ -67,26 +67,13 @@ export default function PhoneNumbers() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            Pronto
-          </Link>
-          <span className="text-gray-600">›</span>
-          <span className="text-gray-300">Settings</span>
-          <span className="text-gray-600">›</span>
-          <span className="text-gray-300">Phone Numbers</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link to="/workflows">
-            <Button variant="outline" size="sm">Workflows</Button>
-          </Link>
-          <Link to="/calls">
-            <Button variant="outline" size="sm">Calls</Button>
-          </Link>
-        </div>
-      </header>
+    <div className="flex-1">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+        <span className="text-gray-300 text-sm font-medium">Phone Numbers</span>
+        <Link to="/settings/integrations">
+          <Button variant="outline" size="sm">Integrations</Button>
+        </Link>
+      </div>
 
       <main className="max-w-3xl mx-auto py-8 px-4">
         <h2 className="text-xl font-semibold text-white mb-6">Phone Numbers</h2>

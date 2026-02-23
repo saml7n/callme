@@ -162,12 +162,17 @@ export default function Integrations() {
   /* ---- Render ---- */
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="flex-1 text-white">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+        <span className="text-gray-300 text-sm font-medium">Integrations</span>
+        <Link to="/settings/phone-numbers">
+          <Button variant="outline" size="sm">Phone Numbers</Button>
+        </Link>
+      </div>
       <div className="max-w-3xl mx-auto px-6 py-10">
-        {/* Header */}
+        {/* Page heading */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <Link to="/" className="text-xs text-gray-500 hover:text-gray-300 mb-2 block">← Home</Link>
             <h1 className="text-2xl font-bold">Integrations</h1>
             <p className="text-sm text-gray-400 mt-1">
               Connect external services for use in workflows.

@@ -195,29 +195,20 @@ export default function LiveCalls() {
   const endedCalls = Object.values(calls).filter((c) => c.ended)
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            Pronto
-          </Link>
-          <span className="text-gray-600">›</span>
-          <span className="text-gray-300">Live Calls</span>
+    <div className="flex-1 flex flex-col">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-gray-300 text-sm font-medium">Live Calls</span>
           {connected ? (
             <Badge className="bg-green-900 text-green-300 text-[10px]">Connected</Badge>
           ) : (
             <Badge className="bg-red-900 text-red-300 text-[10px]">Disconnected</Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Link to="/calls">
-            <Button variant="outline" size="sm">Call Log</Button>
-          </Link>
-          <Link to="/workflows">
-            <Button variant="outline" size="sm">Workflows</Button>
-          </Link>
-        </div>
-      </header>
+        <Link to="/calls">
+          <Button variant="outline" size="sm">Call Log</Button>
+        </Link>
+      </div>
 
       <main className="max-w-5xl mx-auto py-8 px-4">
         {activeCalls.length === 0 && endedCalls.length === 0 && (

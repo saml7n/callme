@@ -44,19 +44,13 @@ export default function CallList() {
   }, [load, offset])
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            Pronto
-          </Link>
-          <span className="text-gray-600">›</span>
-          <span className="text-gray-300">Calls</span>
-        </div>
-        <Link to="/workflows">
-          <Button variant="outline" size="sm">Workflows</Button>
+    <div className="flex-1">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+        <span className="text-gray-300 text-sm font-medium">Calls</span>
+        <Link to="/calls/live">
+          <Button variant="outline" size="sm">Live Calls</Button>
         </Link>
-      </header>
+      </div>
 
       <main className="max-w-5xl mx-auto py-8 px-4">
         {loading && <p className="text-gray-400">Loading…</p>}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ReactFlow,
   Background,
@@ -113,7 +114,7 @@ export default function WorkflowPreview() {
 
   if (loading) {
     return (
-      <div className="h-screen bg-gray-950 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center">
         <p className="text-gray-400 text-lg">Loading workflow…</p>
       </div>
     )
@@ -121,7 +122,7 @@ export default function WorkflowPreview() {
 
   if (error) {
     return (
-      <div className="h-screen bg-gray-950 flex items-center justify-center flex-col gap-4">
+      <div className="flex-1 flex items-center justify-center flex-col gap-4">
         <p className="text-red-400 text-lg">{error}</p>
         <button
           onClick={fetchWorkflow}
@@ -134,12 +135,14 @@ export default function WorkflowPreview() {
   }
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col">
+    <div className="flex-1 flex flex-col">
       {/* Header */}
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+      <header className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <h1 className="text-white font-bold text-lg">Pronto</h1>
-          <span className="text-gray-500">›</span>
+          <Link to="/workflows" className="text-gray-400 hover:text-gray-200 text-sm transition">
+            ← Workflows
+          </Link>
+          <span className="text-gray-600">›</span>
           <span className="text-gray-300">{workflow?.name ?? 'Workflow'}</span>
           <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">
             v{workflow?.version}

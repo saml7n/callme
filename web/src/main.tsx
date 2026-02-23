@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import App from './App'
 import AuthGuard from './components/AuthGuard'
+import AppShell from './components/AppShell'
 import Login from './pages/Login'
 import WorkflowPreview from './pages/WorkflowPreview'
 import WorkflowBuilder from './pages/WorkflowBuilder'
@@ -14,23 +15,28 @@ import PhoneNumbers from './pages/PhoneNumbers'
 import Integrations from './pages/Integrations'
 import Setup from './pages/Setup'
 import LiveCalls from './pages/LiveCalls'
+import NotFound from './pages/NotFound'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/setup" element={<AuthGuard><Setup /></AuthGuard>} />
-        <Route path="/" element={<AuthGuard><App /></AuthGuard>} />
-        <Route path="/workflows" element={<AuthGuard><WorkflowList /></AuthGuard>} />
-        <Route path="/workflows/new" element={<AuthGuard><WorkflowBuilder /></AuthGuard>} />
-        <Route path="/workflows/:id/edit" element={<AuthGuard><WorkflowBuilder /></AuthGuard>} />
-        <Route path="/workflows/preview" element={<AuthGuard><WorkflowPreview /></AuthGuard>} />
-        <Route path="/calls/live" element={<AuthGuard><LiveCalls /></AuthGuard>} />
-        <Route path="/calls" element={<AuthGuard><CallList /></AuthGuard>} />
-        <Route path="/calls/:id" element={<AuthGuard><CallDetail /></AuthGuard>} />
-        <Route path="/settings/phone-numbers" element={<AuthGuard><PhoneNumbers /></AuthGuard>} />
-        <Route path="/settings/integrations" element={<AuthGuard><Integrations /></AuthGuard>} />
+        {/* All authenticated routes share the AppShell nav bar */}
+        <Route element={<AuthGuard><AppShell /></AuthGuard>}>
+          <Route path="/" element={<App />} />
+          <Route path="/setup" element={<Setup />} />
+          <Route path="/workflows" element={<WorkflowList />} />
+          <Route path="/workflows/new" element={<WorkflowBuilder />} />
+          <Route path="/workflows/:id/edit" element={<WorkflowBuilder />} />
+          <Route path="/workflows/preview" element={<WorkflowPreview />} />
+          <Route path="/calls/live" element={<LiveCalls />} />
+          <Route path="/calls" element={<CallList />} />
+          <Route path="/calls/:id" element={<CallDetail />} />
+          <Route path="/settings/phone-numbers" element={<PhoneNumbers />} />
+          <Route path="/settings/integrations" element={<Integrations />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   </StrictMode>,

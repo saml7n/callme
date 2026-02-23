@@ -263,7 +263,7 @@ export default function Setup() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="flex-1 text-white flex flex-col">
       {/* Progress bar */}
       <div className="border-b border-gray-800 bg-gray-900/50">
         <div className="mx-auto max-w-2xl px-6 py-4">

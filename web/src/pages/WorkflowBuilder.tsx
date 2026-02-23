@@ -443,19 +443,19 @@ export default function WorkflowBuilder() {
 
   if (loading) {
     return (
-      <div className="h-screen bg-gray-950 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center">
         <p className="text-gray-400 text-lg">Loading workflow…</p>
       </div>
     )
   }
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col">
+    <div className="flex-1 flex flex-col">
       {/* Header */}
-      <header className="bg-gray-900 border-b border-gray-800 px-4 py-2 flex items-center justify-between shrink-0">
+      <header className="bg-gray-900/50 border-b border-gray-800 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            Pronto
+          <Link to="/workflows" className="text-gray-400 hover:text-gray-200 text-sm transition">
+            ← Workflows
           </Link>
           <span className="text-gray-600">›</span>
           <Input

@@ -305,9 +305,8 @@ describe('LiveCalls page', () => {
     expect(callerEl.textContent).toContain('•')
   })
 
-  it('has navigation links to Call Log and Workflows', () => {
+  it('has navigation link to Call Log', () => {
     renderPage()
     expect(screen.getByText('Call Log')).toBeInTheDocument()
-    expect(screen.getByText('Workflows')).toBeInTheDocument()
   })
 })

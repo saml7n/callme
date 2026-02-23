@@ -151,18 +151,14 @@ export default function CallDetail() {
   }, [load])
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center gap-4">
-        <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-          Pronto
-        </Link>
-        <span className="text-gray-600">›</span>
-        <Link to="/calls" className="text-gray-400 hover:text-gray-200 transition">
+    <div className="flex-1">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center gap-2">
+        <Link to="/calls" className="text-gray-400 hover:text-gray-200 text-sm transition">
           Calls
         </Link>
-        <span className="text-gray-600">›</span>
-        <span className="text-gray-300">Detail</span>
-      </header>
+        <span className="text-gray-600 text-sm">›</span>
+        <span className="text-gray-300 text-sm">Detail</span>
+      </div>
 
       <main className="max-w-3xl mx-auto py-8 px-4">
         {loading && <p className="text-gray-400">Loading…</p>}

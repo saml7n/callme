@@ -42,27 +42,17 @@ export default function WorkflowList() {
   )
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-white font-bold text-lg hover:text-indigo-400 transition">
-            Pronto
-          </Link>
-          <span className="text-gray-600">›</span>
-          <span className="text-gray-300">Workflows</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link to="/calls">
-            <Button variant="outline" size="sm">Calls</Button>
-          </Link>
-          <Button
-            className="bg-indigo-600 text-white hover:bg-indigo-500"
-            onClick={() => navigate('/workflows/new')}
-          >
-            + New Workflow
-          </Button>
-        </div>
-      </header>
+    <div className="flex-1">
+      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+        <span className="text-gray-300 text-sm font-medium">Workflows</span>
+        <Button
+          className="bg-indigo-600 text-white hover:bg-indigo-500"
+          size="sm"
+          onClick={() => navigate('/workflows/new')}
+        >
+          + New Workflow
+        </Button>
+      </div>
 
       <main className="max-w-4xl mx-auto py-8 px-4">
         {loading && <p className="text-gray-400">Loading…</p>}
