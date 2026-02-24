@@ -1348,14 +1348,14 @@ The Docker Compose setup already works but has rough edges for the demo scenario
 
 ### Acceptance criteria
 
-- [ ] **Single-command start.** `docker compose up` (or `make demo`) starts the server, web UI (nginx), and optionally an ngrok sidecar container — everything needed for a working demo.
-- [ ] **ngrok sidecar (optional).** A `tunnels` service in `docker-compose.yml` runs ngrok, and the server auto-detects the tunnel URL on startup (via ngrok's local API at `http://tunnels:4040/api/tunnels`). If ngrok is not running or `PUBLIC_URL` is set manually, it's used as-is.
-- [ ] **Auto-detect PUBLIC_URL.** On startup, the server checks: (1) `PUBLIC_URL` env var, (2) ngrok API, (3) falls back to `http://localhost:3000`. The resolved URL is stored in the DB settings so the webhook handler can use it without restart.
-- [ ] **Demo seed data.** A `make seed` or startup flag (`SEED_DEMO=true`) populates the DB with: a demo user account, an impressive sample workflow (e.g. a dental office receptionist), and a few synthetic call log entries so the dashboard isn't empty.
-- [ ] **Demo reset.** `POST /api/admin/reset` (admin-only, guarded by `CALLME_API_KEY`) wipes all user data and re-seeds. Web UI has a "Reset Demo" button in an admin settings area.
-- [ ] **Makefile.** Root-level `Makefile` with targets: `make demo` (docker compose up), `make dev` (local server + web + ngrok), `make test` (server + web tests), `make seed`, `make reset`.
-- [ ] **Dynamic CORS.** CORS `allow_origins` includes the resolved `PUBLIC_URL` origin + localhost dev ports, so the web UI works regardless of how it's accessed.
-- [ ] **Health dashboard.** `GET /health` returns service connectivity status (can reach Twilio, Deepgram, ElevenLabs, OpenAI) so the host can verify everything is wired up.
+- [x] **Single-command start.** `docker compose up` (or `make demo`) starts the server, web UI (nginx), and optionally an ngrok sidecar container — everything needed for a working demo.
+- [x] **ngrok sidecar (optional).** A `tunnels` service in `docker-compose.yml` runs ngrok, and the server auto-detects the tunnel URL on startup (via ngrok's local API at `http://tunnels:4040/api/tunnels`). If ngrok is not running or `PUBLIC_URL` is set manually, it's used as-is.
+- [x] **Auto-detect PUBLIC_URL.** On startup, the server checks: (1) `PUBLIC_URL` env var, (2) ngrok API, (3) falls back to `http://localhost:3000`. The resolved URL is stored in the DB settings so the webhook handler can use it without restart.
+- [x] **Demo seed data.** A `make seed` or startup flag (`SEED_DEMO=true`) populates the DB with: a demo user account, an impressive sample workflow (e.g. a dental office receptionist), and a few synthetic call log entries so the dashboard isn't empty.
+- [x] **Demo reset.** `POST /api/admin/reset` (admin-only, guarded by `CALLME_API_KEY`) wipes all user data and re-seeds. Web UI has a "Reset Demo" button in an admin settings area.
+- [x] **Makefile.** Root-level `Makefile` with targets: `make demo` (docker compose up), `make dev` (local server + web + ngrok), `make test` (server + web tests), `make seed`, `make reset`.
+- [x] **Dynamic CORS.** CORS `allow_origins` includes the resolved `PUBLIC_URL` origin + localhost dev ports, so the web UI works regardless of how it's accessed.
+- [x] **Health dashboard.** `GET /health` returns service connectivity status (can reach Twilio, Deepgram, ElevenLabs, OpenAI) so the host can verify everything is wired up.
 
 ### Technical notes
 
