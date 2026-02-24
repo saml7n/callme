@@ -178,7 +178,9 @@ class TestStartup:
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             resp = await c.get("/health")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        data = resp.json()
+        assert data["status"] in ("ok", "degraded")
+        assert "services" in data
 
 
 # ---------------------------------------------------------------------------

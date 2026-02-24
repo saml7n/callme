@@ -88,6 +88,10 @@ export default function Setup() {
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
 
+  // Demo mode state
+  const [demoMode, setDemoMode] = useState(false)
+  const [resetting, setResetting] = useState(false)
+
   // Load existing settings on mount — pre-fill fields and auto-validate if keys exist
   useEffect(() => {
     let cancelled = false
@@ -100,6 +104,14 @@ export default function Setup() {
           if (!cancelled) setPlatformStatus(ps)
         } catch {
           // ignore — platform status is optional
+        }
+
+        // 0b. Check demo mode from health endpoint
+        try {
+          const h = await api.health()
+          if (!cancelled && h.demo_mode) setDemoMode(true)
+        } catch {
+          // ignore
         }
 
         // 1. Load settings and pre-fill fields
@@ -727,6 +739,36 @@ export default function Setup() {
             </Button>
           )}
         </div>
+
+        {/* Demo Reset — only visible in demo mode */}
+        {demoMode && (
+          <div className="mt-10 pt-6 border-t border-red-900/40" data-testid="demo-reset">
+            <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-4 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-red-400">Demo Mode</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Wipe all data and re-seed with fresh demo content.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="border-red-800 text-red-400 hover:bg-red-950/50 text-sm"
+                disabled={resetting}
+                onClick={async () => {
+                  setResetting(true)
+                  try {
+                    await api.admin.reset()
+                    window.location.reload()
+                  } catch {
+                    setResetting(false)
+                  }
+                }}
+              >
+                {resetting ? 'Resetting...' : 'Reset Demo Data'}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

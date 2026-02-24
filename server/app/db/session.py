@@ -94,6 +94,11 @@ def init_db() -> None:
     _migrate_existing_data()
 
 
+def get_engine():
+    """Return the module-level SQLAlchemy engine."""
+    return _engine
+
+
 def get_session() -> Generator[Session, None, None]:
     """Yield a SQLModel session — use as a FastAPI ``Depends``."""
     with Session(_engine) as session:

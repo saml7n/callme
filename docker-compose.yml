@@ -1,5 +1,6 @@
 # CallMe — single-command quickstart
 # Usage: docker compose up --build
+# With ngrok: NGROK_AUTHTOKEN=xxx docker compose --profile tunnel up --build
 
 services:
   server:
@@ -7,6 +8,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: sqlite:///./data/callme.db
+      SEED_DEMO: ${SEED_DEMO:-true}
+      NGROK_HOST: tunnels
     volumes:
       - callme-data:/app/data
     ports:
@@ -21,6 +24,19 @@ services:
     build: ./web
     ports:
       - "8080:80"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  # Optional ngrok tunnel — activate with: docker compose --profile tunnel up
+  tunnels:
+    image: ngrok/ngrok:latest
+    profiles: ["tunnel"]
+    command: http server:3000 --log stdout
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    ports:
+      - "4040:4040"
     depends_on:
       server:
         condition: service_healthy

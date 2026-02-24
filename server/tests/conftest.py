@@ -11,13 +11,17 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.db.session as session_mod
-import app.db.call_logger as call_logger_mod
-import app.twilio.media_stream as media_stream_mod
 from app.auth import get_current_user, require_auth
 import app.auth as auth_mod
 from app.db.models import Call, CallEvent, EventType, Integration, IntegrationType, PhoneNumber, User, Workflow
 from app.db.session import get_session as _original_get_session
 from app.main import app
+
+# Lazy import — seed may not exist yet in older branches
+try:
+    import app.seed as seed_mod
+except ImportError:
+    seed_mod = None  # type: ignore[assignment]
 
 # Fixed test API key
 TEST_API_KEY = "test-api-key-for-tests"
@@ -99,11 +103,15 @@ def db_session() -> Generator[Session, None, None]:
 
     # Monkey-patch at every import site
     original_session = session_mod.get_session
-    original_call_logger = call_logger_mod.get_session
-    original_media_stream = media_stream_mod.get_session
+    original_engine = session_mod._engine
+    original_get_engine = session_mod.get_engine
     session_mod.get_session = _override
-    call_logger_mod.get_session = _override
-    media_stream_mod.get_session = _override
+    session_mod._engine = engine          # call_logger & media_stream import _engine lazily
+    session_mod.get_engine = lambda: engine  # type: ignore[assignment]
+    # Also patch get_engine where seed.py imported it
+    if seed_mod is not None:
+        original_seed_get_engine = seed_mod.get_engine
+        seed_mod.get_engine = lambda: engine  # type: ignore[assignment]
 
     # FastAPI dependency override for endpoints using Depends(get_session)
     app.dependency_overrides[_original_get_session] = _override
@@ -120,8 +128,10 @@ def db_session() -> Generator[Session, None, None]:
 
     # Restore everything
     session_mod.get_session = original_session
-    call_logger_mod.get_session = original_call_logger
-    media_stream_mod.get_session = original_media_stream
+    session_mod._engine = original_engine
+    session_mod.get_engine = original_get_engine
+    if seed_mod is not None:
+        seed_mod.get_engine = original_seed_get_engine
     app.dependency_overrides.pop(_original_get_session, None)
     app.dependency_overrides.pop(require_auth, None)
     app.dependency_overrides.pop(get_current_user, None)

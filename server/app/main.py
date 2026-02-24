@@ -1,10 +1,12 @@
 import logging
+import os
 
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.calls import router as calls_router
 from app.api.integrations import router as integrations_router
@@ -16,6 +18,7 @@ from app.api.templates import router as templates_router
 from app.api.workflows import router as workflows_router
 from app.auth import init_api_key
 from app.db.session import init_db
+from app.public_url import get_public_url, resolve_public_url
 from app.twilio.media_stream import router as media_stream_router
 from app.twilio.webhook import router as webhook_router
 
@@ -66,20 +69,59 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.getLogger(__name__).warning("Failed to warm filler cache — fillers disabled")
 
+    # Resolve PUBLIC_URL (env → ngrok API → localhost fallback)
+    try:
+        public_url = await resolve_public_url()
+        logging.getLogger(__name__).info("Resolved PUBLIC_URL: %s", public_url)
+    except Exception:
+        logging.getLogger(__name__).warning("PUBLIC_URL resolution failed — using localhost fallback")
+
+    # Auto-seed demo data if SEED_DEMO=true
+    if os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes"):
+        try:
+            from app.seed import seed_demo_data
+            seed_demo_data()
+            logging.getLogger(__name__).info("Demo data seeded successfully")
+        except Exception:
+            logging.getLogger(__name__).warning("Demo seed failed", exc_info=True)
+
     yield
 
 
 app = FastAPI(title="CallMe", description="AI Receptionist Server", lifespan=lifespan)
 
-# CORS — allow the Vite dev server during development
+
+def _get_cors_origins() -> list[str]:
+    """Build CORS allow_origins dynamically from PUBLIC_URL + dev ports."""
+    origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:8080",   # Docker web (nginx)
+        "http://127.0.0.1:8080",
+    ]
+    public = get_public_url()
+    if public and public not in origins:
+        origins.append(public)
+        # Also allow the same host on port 8080 (Docker web via ngrok)
+        from urllib.parse import urlparse
+        parsed = urlparse(public)
+        if parsed.scheme and parsed.hostname:
+            alt = f"{parsed.scheme}://{parsed.hostname}:8080"
+            if alt not in origins:
+                origins.append(alt)
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-                   "http://localhost:5174", "http://localhost:5175"],
+    allow_origins=_get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(media_stream_router)
@@ -95,4 +137,14 @@ app.include_router(platform_router)
 
 @app.get("/health")
 async def health_check() -> dict:
-    return {"status": "ok"}
+    """Enhanced health endpoint — reports service connectivity."""
+    from app.health import check_all_services
+    services = await check_all_services()
+    all_ok = all(s["status"] == "ok" for s in services.values())
+    demo_mode = os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes")
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "public_url": get_public_url(),
+        "demo_mode": demo_mode,
+        "services": services,
+    }

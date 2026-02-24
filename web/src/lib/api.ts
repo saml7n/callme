@@ -193,4 +193,15 @@ export const api = {
   platform: {
     status: () => request<PlatformStatus>('/api/platform/status'),
   },
+
+  admin: {
+    reset: () =>
+      request<{ status: string; message: string }>('/api/admin/reset', { method: 'POST' }),
+
+    seed: () =>
+      request<{ status: string; message: string }>('/api/admin/seed', { method: 'POST' }),
+  },
+
+  health: () =>
+    request<{ status: string; public_url: string | null; demo_mode: boolean; services: Record<string, { status: string }> }>('/health'),
 }
