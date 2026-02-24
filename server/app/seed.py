@@ -43,19 +43,13 @@ def seed_demo_data() -> dict[str, str]:
     """
     engine = get_engine()
     with Session(engine) as session:
-        # 1. User
-        user = session.exec(select(User).where(User.email == DEMO_EMAIL)).first()
-        if user is None:
-            user = User(
-                email=DEMO_EMAIL,
-                password_hash=hash_password(DEMO_PASSWORD),
-                name=DEMO_NAME,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            logger.info("Seeded demo user: %s", user.email)
+        # 1. Use the admin user (same user that API key auth resolves to)
+        #    so that seeded data is visible via both API key and JWT login.
+        from app.auth import ensure_admin_user
+
+        user = ensure_admin_user(session)
         user_id = user.id
+        user_email = user.email  # capture before session closes
 
         # 2. Workflow — use the reception_flow.json example
         wf = session.exec(
@@ -115,7 +109,7 @@ def seed_demo_data() -> dict[str, str]:
             _seed_synthetic_calls(session, user_id, wf.id, phone)
 
     return {
-        "user": DEMO_EMAIL,
+        "user": user_email,
         "workflow": "Dental Reception Flow",
         "phone": phone,
         "calls_seeded": "3",

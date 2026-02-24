@@ -17,6 +17,7 @@ from app.api.settings import router as settings_router
 from app.api.templates import router as templates_router
 from app.api.workflows import router as workflows_router
 from app.auth import init_api_key
+from app.config import settings
 from app.db.session import init_db
 from app.public_url import get_public_url, resolve_public_url
 from app.twilio.media_stream import router as media_stream_router
@@ -101,16 +102,19 @@ def _get_cors_origins() -> list[str]:
         "http://localhost:8080",   # Docker web (nginx)
         "http://127.0.0.1:8080",
     ]
-    public = get_public_url()
-    if public and public not in origins:
-        origins.append(public)
-        # Also allow the same host on port 8080 (Docker web via ngrok)
-        from urllib.parse import urlparse
-        parsed = urlparse(public)
-        if parsed.scheme and parsed.hostname:
-            alt = f"{parsed.scheme}://{parsed.hostname}:8080"
-            if alt not in origins:
-                origins.append(alt)
+    # Check both the cached resolve result and the env var (middleware is built
+    # at import time before the async resolve runs).
+    candidates = [get_public_url(), settings.public_url]
+    for public in candidates:
+        if public and public not in origins:
+            origins.append(public)
+            # Also allow the same host on port 8080 (Docker web via ngrok)
+            from urllib.parse import urlparse
+            parsed = urlparse(public)
+            if parsed.scheme and parsed.hostname:
+                alt = f"{parsed.scheme}://{parsed.hostname}:8080"
+                if alt not in origins:
+                    origins.append(alt)
     return origins
 
 

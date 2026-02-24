@@ -117,8 +117,11 @@ _admin_user_id: UUID | None = None
 def ensure_admin_user(session: Session) -> User:
     """Get or create the admin user used for API key auth & data backfill.
 
-    The admin user has email ``admin@local`` and is created automatically.
+    When ``SEED_DEMO`` is enabled the admin user is created with a friendly
+    demo email (``demo@callme.ai`` / ``demo1234``) so that the web-UI login
+    works out of the box.  Otherwise it uses ``admin@local`` with no password.
     """
+    import os
     from sqlmodel import select
 
     global _admin_user_id
@@ -127,17 +130,33 @@ def ensure_admin_user(session: Session) -> User:
         if existing is not None:
             return existing
 
-    existing = session.exec(select(User).where(User.email == "admin@local")).first()
+    demo_mode = os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes")
+    admin_email = "demo@callme.ai" if demo_mode else "admin@local"
+
+    # Check both emails so we find the user regardless of mode switch
+    existing = session.exec(
+        select(User).where(User.email.in_(["admin@local", "demo@callme.ai"]))  # type: ignore[union-attr]
+    ).first()
     if existing is not None:
         _admin_user_id = existing.id
         return existing
 
-    admin = User(email="admin@local", name="Admin", password_hash="")
+    # Create with demo credentials when SEED_DEMO is active
+    if demo_mode:
+        from app.seed import DEMO_PASSWORD, DEMO_NAME
+        admin = User(
+            email=admin_email,
+            name=DEMO_NAME,
+            password_hash=hash_password(DEMO_PASSWORD),
+        )
+    else:
+        admin = User(email=admin_email, name="Admin", password_hash="")
+
     session.add(admin)
     session.commit()
     session.refresh(admin)
     _admin_user_id = admin.id
-    logger.info("Created admin user: %s", admin.id)
+    logger.info("Created admin user: %s (email=%s)", admin.id, admin_email)
     return admin
 
 

@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import os
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 
+import app.auth as auth_mod
 from app.db.models import Call, CallEvent, PhoneNumber, Setting, User, Workflow
 from app.main import app
-from app.seed import DEMO_EMAIL, seed_demo_data, wipe_demo_data
+from app.seed import DEMO_EMAIL, DEMO_NAME, seed_demo_data, wipe_demo_data
+
+
+@pytest.fixture(autouse=True)
+def _enable_demo_mode(monkeypatch):
+    """Ensure SEED_DEMO=true so ensure_admin_user creates demo@callme.ai."""
+    monkeypatch.setenv("SEED_DEMO", "true")
+    # Clear the cached admin user ID so each test starts fresh
+    auth_mod._admin_user_id = None
 
 
 # ---------------------------------------------------------------------------

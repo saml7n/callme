@@ -136,4 +136,4 @@ def db_session() -> Generator[Session, None, None]:
     app.dependency_overrides.pop(require_auth, None)
     app.dependency_overrides.pop(get_current_user, None)
     # Clear the admin user cache so it doesn't leak across tests
-    auth_mod._ADMIN_USER = None
+    auth_mod._admin_user_id = None

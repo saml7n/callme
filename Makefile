@@ -1,5 +1,11 @@
 .PHONY: demo dev test seed reset clean
 
+# Load .env if it exists (export all vars so sub-processes inherit them)
+ifneq (,$(wildcard .env))
+  include .env
+  export
+endif
+
 # ─── Docker demo ──────────────────────────────────────────────────
 demo:  ## Start the full stack via Docker Compose (server + web + optional ngrok)
 	docker compose up --build
@@ -8,9 +14,9 @@ demo-tunnel:  ## Start with ngrok tunnel (requires NGROK_AUTHTOKEN)
 	docker compose --profile tunnel up --build
 
 # ─── Local development ────────────────────────────────────────────
-dev:  ## Start server + web locally (no Docker)
+dev:  ## Start server + web locally (no Docker) — auto-seeds if SEED_DEMO=true
 	@echo "Starting server on :3000 and web on :5173..."
-	@cd server && uv run uvicorn app.main:app --port 3000 --reload &
+	@cd server && SEED_DEMO=$${SEED_DEMO:-true} uv run uvicorn app.main:app --port 3000 --reload &
 	@cd web && npm run dev &
 	@wait
 
@@ -39,7 +45,7 @@ seed:  ## Seed demo data into the local database
 	cd server && SEED_DEMO=true uv run python -c "from app.seed import seed_demo_data; print(seed_demo_data())"
 
 reset:  ## Wipe all data and re-seed demo environment
-	cd server && uv run python -c "from app.seed import wipe_demo_data, seed_demo_data; wipe_demo_data(); print(seed_demo_data())"
+	cd server && SEED_DEMO=true uv run python -c "from app.seed import wipe_demo_data, seed_demo_data; wipe_demo_data(); print(seed_demo_data())"
 
 # ─── Cleanup ──────────────────────────────────────────────────────
 clean:  ## Remove database, caches, and Docker volumes
@@ -49,4 +55,4 @@ clean:  ## Remove database, caches, and Docker volumes
 
 # ─── Help ─────────────────────────────────────────────────────────
 help:  ## Show this help message
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' Makefile | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
