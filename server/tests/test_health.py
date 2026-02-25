@@ -1,4 +1,4 @@
-"""Tests for the enhanced /health endpoint (Story 24)."""
+"""Tests for the /health endpoint."""
 
 import os
 from unittest.mock import patch, AsyncMock
@@ -10,8 +10,23 @@ from app.main import app
 
 
 @pytest.mark.asyncio
-async def test_health_returns_service_status():
-    """Health endpoint returns status, public_url, demo_mode, and services."""
+async def test_health_liveness():
+    """Health endpoint without ?detail returns fast liveness (no external calls)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "public_url" in data
+    assert "demo_mode" in data
+    assert "services" not in data
+
+
+@pytest.mark.asyncio
+async def test_health_detail_returns_service_status():
+    """Health endpoint with ?detail=true returns full service connectivity."""
     mock_services = {
         "twilio": {"status": "ok"},
         "deepgram": {"status": "ok"},
@@ -21,7 +36,7 @@ async def test_health_returns_service_status():
     with patch("app.health.check_all_services", new_callable=AsyncMock, return_value=mock_services):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/health")
+            response = await client.get("/health?detail=true")
 
     assert response.status_code == 200
     data = response.json()
@@ -44,7 +59,7 @@ async def test_health_degraded_when_service_down():
     with patch("app.health.check_all_services", new_callable=AsyncMock, return_value=mock_services):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/health")
+            response = await client.get("/health?detail=true")
 
     assert response.status_code == 200
     data = response.json()

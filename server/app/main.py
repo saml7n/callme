@@ -140,15 +140,22 @@ app.include_router(platform_router)
 
 
 @app.get("/health")
-async def health_check() -> dict:
-    """Enhanced health endpoint — reports service connectivity."""
-    from app.health import check_all_services
-    services = await check_all_services()
-    all_ok = all(s["status"] == "ok" for s in services.values())
+async def health_check(detail: bool = False) -> dict:
+    """Health endpoint.
+
+    By default returns a fast liveness response (no external calls).
+    Pass ``?detail=true`` to probe external service connectivity.
+    """
     demo_mode = os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes")
-    return {
-        "status": "ok" if all_ok else "degraded",
+    result: dict = {
+        "status": "ok",
         "public_url": get_public_url(),
         "demo_mode": demo_mode,
-        "services": services,
     }
+    if detail:
+        from app.health import check_all_services
+        services = await check_all_services()
+        all_ok = all(s["status"] == "ok" for s in services.values())
+        result["status"] = "ok" if all_ok else "degraded"
+        result["services"] = services
+    return result

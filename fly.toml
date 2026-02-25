@@ -30,7 +30,7 @@ primary_region = "lhr"
   interval = "15s"
   method = "GET"
   path = "/health"
-  timeout = "5s"
+  timeout = "10s"
 
 [mounts]
   source = "callme_data"
