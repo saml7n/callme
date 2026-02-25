@@ -33,6 +33,16 @@ Story 0: Decisions (no code)
                                   → Story 19: Global navigation & UI flow polish
                     → Story 20: Live call count banner
                     → Story 21: One-click Google Calendar OAuth
+
+Story 22-24: (previously completed features)
+Story 25: Cloud deployment (Fly.io)
+  → Story 26: Security hardening
+    → Story 27: Rate limiting & abuse prevention
+  → Story 28: Outbound calls
+  → Story 29: Call analytics dashboard
+  → Story 30: Multi-voice & per-node TTS
+  → Story 31: Contact management (CRM)
+    → Story 32: Caller recognition & context injection
 ```
 
 ---
@@ -1478,3 +1488,554 @@ if fly_app:
 
 1. ~~Fly.io app name?~~ → `callme-pronto`
 2. ~~Region?~~ → `lhr` (London)
+
+---
+
+## Story 26 — Security hardening
+
+As a **platform host**, I want **the security vulnerabilities identified in the audit fixed**, so that **the deployed app can't be abused by malicious users creating accounts, wiping data, or forging tokens**.
+
+### Background
+
+The [security audit](security-audit.md) found 1 critical, 2 high, and 3 medium vulnerabilities. This story addresses all of them in one pass. The key changes: gate registration behind an invite code, add admin role checks, authenticate WebSockets, use a separate JWT signing secret, and make demo credentials configurable.
+
+### Acceptance criteria
+
+- [ ] **Gated registration.** `POST /api/auth/register` requires a valid `invite_code` field. A new env var `CALLME_INVITE_CODE` controls the code. If not set, registration is disabled entirely (returns 403). Existing users are unaffected.
+- [ ] **Admin role.** `User` model gains an `is_admin: bool = False` field. The seed script sets the demo user as admin. The API key bypass also resolves to an admin user.
+- [ ] **Admin-only endpoints.** `POST /api/admin/reset` and `POST /api/admin/seed` require `is_admin=True`. Non-admin users get 403. A new `require_admin` dependency enforces this.
+- [ ] **WebSocket authentication.** `GET /ws/calls/live` validates the `token` query parameter as a JWT or API key before calling `ws.accept()`. Invalid tokens get `ws.close(code=4001, reason="Unauthorized")`.
+- [ ] **Separate JWT secret.** New env var `JWT_SECRET`. If not set, falls back to `CALLME_API_KEY` (backward compatible) but logs a warning at startup. JWT signing uses `JWT_SECRET`, API key auth still checks `CALLME_API_KEY`.
+- [ ] **Configurable demo credentials.** New env vars `DEMO_EMAIL` and `DEMO_PASSWORD` (defaults: `demo@callme.ai` / auto-generated UUID if not set). Logged once at startup when `SEED_DEMO=true`.
+- [ ] **Health endpoint hardened.** Unauthenticated `GET /health` returns only `{"status": "ok"}`. Detailed service info moved to `GET /health?detail=true` which requires auth (Bearer token).
+- [ ] **Password policy.** Registration requires minimum 8 characters with at least one letter and one digit. Returns 422 with clear message on violation.
+- [ ] **All existing tests still pass.** New tests cover every change.
+
+### Technical notes
+
+#### Invite code flow
+```
+POST /api/auth/register
+Body: { email, password, name, invite_code }
+
+if not settings.invite_code:
+    raise HTTPException(403, "Registration is disabled")
+if body.invite_code != settings.invite_code:
+    raise HTTPException(403, "Invalid invite code")
+```
+
+#### require_admin dependency
+```python
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(403, "Admin access required")
+    return user
+```
+
+### Implementation tasks
+
+1. **Server — `User` model** — add `is_admin` bool field + Alembic migration.
+2. **Server — `config.py`** — add `invite_code`, `jwt_secret`, `demo_email`, `demo_password` settings.
+3. **Server — `auth.py`** — separate JWT secret, invite code check on register, password policy validation.
+4. **Server — `admin.py`** — switch to `require_admin` dependency.
+5. **Server — `live.py`** — validate WebSocket token before accept.
+6. **Server — `main.py`** — health endpoint: default minimal, detail requires auth.
+7. **Server — `seed.py`** — use configurable demo credentials, set `is_admin=True`.
+8. **Web — registration form** — add invite code field (shown only when registration is available).
+9. **Tests** — cover all 8 acceptance criteria.
+
+### Unit tests
+
+- **Server:** Registration rejected without invite code. Registration rejected with wrong code. Registration succeeds with correct code. Registration disabled when env var not set. Admin endpoints return 403 for non-admin users. Admin endpoints succeed for admin users. WebSocket rejects invalid token with code 4001. WebSocket accepts valid JWT. JWT signed with `JWT_SECRET` not `CALLME_API_KEY` when both are set. Health default returns only status. Health detail requires auth. Password under 8 chars rejected. Password without digit rejected. Password without letter rejected.
+- **Web:** Invite code field rendered on registration page. Error message displayed on invalid code.
+
+### QA verification
+
+1. With `CALLME_INVITE_CODE` unset → `POST /api/auth/register` returns 403.
+2. With code set → register with wrong code returns 403, correct code succeeds.
+3. Login as non-admin → `POST /api/admin/reset` returns 403.
+4. Login as admin → `POST /api/admin/reset` succeeds.
+5. Connect to `/ws/calls/live` without token → connection closed with 4001.
+6. Connect with valid JWT → events stream normally.
+7. `GET /health` returns `{"status": "ok"}` only. `GET /health?detail=true` with Bearer token returns full info.
+8. Deploy to Fly.io with `JWT_SECRET` set → existing JWTs still work (if `JWT_SECRET` == old `CALLME_API_KEY`).
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 27 — Rate limiting & abuse prevention
+
+As a **platform host**, I want **rate limiting on authentication and API endpoints**, so that **brute-force attacks and credit abuse are prevented**.
+
+### Background
+
+The security audit flagged "no rate limiting on any endpoint" as high severity. This story adds `slowapi` rate limiting with sensible defaults: tight limits on auth endpoints, moderate limits on API calls, and per-user limits on call-triggering operations. Also adds a simple usage tracking table so admins can monitor consumption.
+
+### Acceptance criteria
+
+- [ ] **Auth rate limiting.** `POST /api/auth/login` and `POST /api/auth/register` limited to 10 requests/minute per IP. Returns 429 with `Retry-After` header on exceed.
+- [ ] **API rate limiting.** All `/api/*` endpoints limited to 120 requests/minute per authenticated user. Returns 429 on exceed.
+- [ ] **Call rate limiting.** Inbound calls (Twilio webhook) limited to 30 per hour per user (based on `to_number` → user lookup). Excess calls get a TwiML "busy" response.
+- [ ] **Usage tracking.** New `Usage` model: `user_id`, `date`, `calls_count`, `llm_tokens`, `tts_characters`, `stt_seconds`. Updated atomically during call processing.
+- [ ] **Admin usage endpoint.** `GET /api/admin/usage?days=7` returns per-user usage summaries. Admin-only.
+- [ ] **User usage endpoint.** `GET /api/usage` returns the authenticated user's own usage for the current billing period (last 30 days).
+- [ ] **Web — usage indicator.** Simple usage badge in the nav bar showing call count for the current day. Settings page shows detailed 30-day usage breakdown.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### slowapi setup
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+```
+
+#### Usage model
+```python
+class Usage(SQLModel, table=True):
+    id: UUID
+    user_id: UUID  # FK → users
+    date: date     # one row per user per day
+    calls_count: int = 0
+    llm_tokens: int = 0
+    tts_characters: int = 0
+    stt_seconds: float = 0.0
+```
+
+### Implementation tasks
+
+1. **Server — `slowapi` dependency** added to `pyproject.toml`.
+2. **Server — rate limit middleware** in `main.py`.
+3. **Server — auth rate limits** on login/register endpoints.
+4. **Server — call rate limit** in Twilio webhook handler.
+5. **Server — `Usage` model** + migration.
+6. **Server — usage tracking** in pipeline (token counts from LLM, chars from TTS, seconds from STT).
+7. **Server — `/api/usage`** and `/api/admin/usage` endpoints.
+8. **Web — usage badge** in nav bar.
+9. **Web — usage breakdown** in settings page.
+10. **Tests** — rate limit returns 429, usage increments correctly, admin endpoint scoped.
+
+### Unit tests
+
+- **Server:** Auth endpoint returns 429 after 10 rapid requests from same IP. API endpoint returns 429 after 120 requests/minute. Call webhook returns busy TwiML after 30 calls/hour for same user. Usage row created on first call of the day. Usage increments atomically. Admin usage endpoint returns all users' data. User usage endpoint returns only own data. Non-admin cannot access admin usage.
+- **Web:** Usage badge shows today's call count. Settings page renders 30-day chart.
+
+### QA verification
+
+1. Rapid-fire `POST /api/auth/login` with wrong password → 429 after 10 attempts within 1 minute.
+2. Make 31 calls to the same Twilio number within an hour → 31st call hears busy tone.
+3. Navigate to Settings → Usage section → see call count, token usage for the last 30 days.
+4. Login as admin → `GET /api/admin/usage?days=7` returns per-user breakdown.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 28 — Outbound calls
+
+As a **business user**, I want **to initiate outbound calls from the web UI**, so that **I can use my AI receptionist to make calls (callbacks, appointment reminders, follow-ups) — not just answer them**.
+
+### Background
+
+Currently Pronto only handles inbound calls initiated by Twilio. Outbound calls flip the flow: the server tells Twilio to call a number, and when the callee picks up, the same voice pipeline + workflow engine runs the conversation. This enables callbacks ("We'll call you back"), appointment reminders, and proactive outreach.
+
+### Acceptance criteria
+
+- [ ] **Outbound call API.** `POST /api/calls/outbound` accepts `{ to_number, workflow_id, caller_id? }`. Creates a Twilio outbound call using the user's configured phone number as the caller ID. Returns the `Call` record with `direction: "outbound"`.
+- [ ] **Call direction.** `Call` model gains a `direction` field: `"inbound"` (default) or `"outbound"`. All existing calls default to inbound.
+- [ ] **Outbound TwiML.** When Twilio connects the outbound call, it hits a new webhook `POST /twilio/outbound-stream/{call_id}` which returns `<Connect><Stream>` TwiML pointing at the media stream WebSocket. The workflow runs identically to inbound.
+- [ ] **Outbound call page.** Web UI has a "New Call" button (in nav or on calls page). Opens a dialog: pick a workflow, enter a phone number, click "Call". Shows call status (ringing → in-progress → completed).
+- [ ] **Call log shows direction.** Call log list and detail pages display an inbound/outbound badge. Outbound calls show the dialled number as the primary identifier instead of `from_number`.
+- [ ] **Schedule callback.** New action node type `schedule_callback` — the AI can say "We'll call you back at 3pm" and the system creates a scheduled outbound call. Uses a simple polling loop (check every minute for due callbacks).
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Twilio outbound call
+```python
+from twilio.rest import Client
+
+client = Client(account_sid, auth_token)
+call = client.calls.create(
+    to=to_number,
+    from_=user_phone_number,
+    url=f"{public_url}/twilio/outbound-stream/{call_id}",
+    status_callback=f"{public_url}/twilio/status/{call_id}",
+)
+```
+
+#### Scheduled callbacks
+```python
+class ScheduledCall(SQLModel, table=True):
+    id: UUID
+    user_id: UUID
+    to_number: str
+    workflow_id: UUID
+    scheduled_at: datetime
+    status: str = "pending"  # pending, dialled, failed, cancelled
+```
+
+A background task checks every 60 seconds for `status=pending AND scheduled_at <= now()`.
+
+### Implementation tasks
+
+1. **Server — `Call` model** — add `direction` field (default `"inbound"`).
+2. **Server — `ScheduledCall` model** + migration.
+3. **Server — `POST /api/calls/outbound`** endpoint.
+4. **Server — `POST /twilio/outbound-stream/{call_id}`** webhook returning `<Connect><Stream>` TwiML.
+5. **Server — `schedule_callback` action node** in workflow engine.
+6. **Server — background scheduler** task (asyncio, runs every 60s).
+7. **Web — "New Call" dialog** with workflow picker + phone number input.
+8. **Web — call direction badge** in call log list and detail.
+9. **Tests** — outbound call creation, TwiML generation, scheduler, direction filtering.
+
+### Unit tests
+
+- **Server:** `POST /api/calls/outbound` creates a call with `direction="outbound"`. Outbound TwiML webhook returns valid `<Connect><Stream>`. Call direction defaults to `"inbound"` for existing calls. Scheduled callback created by action node with correct `scheduled_at`. Scheduler picks up due callbacks and initiates outbound calls. Scheduler skips future callbacks. Auth required for outbound endpoint.
+- **Web:** "New Call" dialog opens from button click. Workflow dropdown populated from API. Phone number validated (E.164). Call direction badge renders correctly for inbound/outbound.
+
+### QA verification
+
+1. Click "New Call" → select a workflow → enter a valid phone number → click "Call" → phone rings, AI runs the workflow.
+2. Call log shows the new call with an "Outbound" badge.
+3. Create a workflow with a `schedule_callback` action node → call the AI → it schedules a callback → phone rings at the scheduled time.
+4. Outbound call with invalid number → appropriate error message.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 29 — Call analytics dashboard
+
+As a **business user**, I want **a dashboard showing call volume, trends, and outcomes**, so that **I can understand how my AI receptionist is performing and make data-driven improvements**.
+
+### Background
+
+The call log shows individual calls, but there's no aggregate view. This story adds a dedicated analytics page with charts showing volume over time, average duration, completion rates, and node-level heatmaps. All data comes from existing `Call` and `CallEvent` records — no new data collection needed.
+
+### Acceptance criteria
+
+- [ ] **Analytics page.** New `/analytics` page in the web UI, accessible from the main nav. Shows a date range picker (default: last 7 days).
+- [ ] **Call volume chart.** Bar chart showing calls per day (inbound vs outbound, stacked). Hover shows exact count.
+- [ ] **Duration chart.** Line chart showing average call duration per day.
+- [ ] **Outcome breakdown.** Pie/donut chart showing call outcomes: completed (reached end_call node), transferred, abandoned (caller hung up mid-conversation), errored.
+- [ ] **Node heatmap.** For a selected workflow, show which conversation/decision nodes are visited most often. Highlight bottleneck nodes where callers frequently abandon.
+- [ ] **Top callers.** Table of the top 10 phone numbers by call count, with total calls and average duration.
+- [ ] **Analytics API.** `GET /api/analytics/summary?days=7` returns aggregated data. `GET /api/analytics/node-heatmap?workflow_id=X&days=7` returns per-node visit counts.
+- [ ] **Call outcome tracking.** `Call` model gains an `outcome` field: `completed`, `transferred`, `abandoned`, `errored`. Set automatically when the call ends based on the final event.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Chart library
+Use **Recharts** (already React-compatible, lightweight, good bar/line/pie support). Install: `npm install recharts`.
+
+#### Analytics API response
+```json
+{
+  "period": { "start": "2026-02-18", "end": "2026-02-25" },
+  "total_calls": 142,
+  "avg_duration_seconds": 87.3,
+  "calls_by_day": [
+    { "date": "2026-02-18", "inbound": 18, "outbound": 3 },
+    ...
+  ],
+  "outcomes": { "completed": 98, "transferred": 22, "abandoned": 18, "errored": 4 },
+  "top_callers": [
+    { "number": "+447...", "calls": 12, "avg_duration": 94.2 }
+  ]
+}
+```
+
+### Implementation tasks
+
+1. **Server — `Call` model** — add `outcome` field, auto-set on call end.
+2. **Server — `GET /api/analytics/summary`** endpoint with date range.
+3. **Server — `GET /api/analytics/node-heatmap`** endpoint.
+4. **Server — call outcome detection** logic in pipeline/media_stream (inspect final event type).
+5. **Web — install `recharts`.**
+6. **Web — `/analytics` page** with date picker + 4 chart components.
+7. **Web — node heatmap component** with workflow selector.
+8. **Web — nav link** to analytics page.
+9. **Tests** — analytics aggregation queries, outcome detection, API responses.
+
+### Unit tests
+
+- **Server:** Summary endpoint returns correct totals for date range. `calls_by_day` groups correctly across timezone boundaries. Outcome breakdown counts match. Node heatmap returns visit counts per node ID. Empty date range returns zeroes. Top callers sorted by count descending. Auth required.
+- **Web:** Analytics page renders all 4 chart sections. Date picker changes API query. Node heatmap shows correct node labels from workflow. Loading state shown while fetching.
+
+### QA verification
+
+1. Navigate to Analytics → see call volume chart with last 7 days of data.
+2. Change date range to "Last 30 days" → chart updates.
+3. Hover over a bar → tooltip shows exact inbound/outbound count.
+4. Outcome pie chart matches manual count from call log.
+5. Select a workflow in node heatmap → nodes colored by visit frequency.
+6. Make a few test calls → refresh analytics → numbers update.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 30 — Multi-voice & per-node TTS settings
+
+As a **workflow designer**, I want **to assign different voices to different conversation nodes**, so that **my AI receptionist can use a warm friendly voice for greetings and a professional voice for appointment confirmations, or switch between personas in a multi-character flow**.
+
+### Background
+
+Currently all nodes use the same ElevenLabs voice (configured globally). This story lets users pick a voice per conversation node, with a browser to preview available voices and a "play sample" button. The global voice remains the default — per-node overrides are optional.
+
+### Acceptance criteria
+
+- [ ] **Voice picker in node editor.** Conversation node edit panel gets a "Voice" dropdown. Lists available ElevenLabs voices from the user's account. A "Default (global)" option uses the instance-wide voice.
+- [ ] **Voice preview.** Each voice in the dropdown has a "▶ Preview" button that plays a short TTS sample using that voice.
+- [ ] **Per-node voice in schema.** `ConversationNode` schema gains an optional `voice_id` field. If set, the pipeline uses that voice for TTS in that node instead of the global default.
+- [ ] **Pipeline voice switching.** When the workflow engine transitions to a node with a `voice_id`, the TTS client switches to that voice for all utterances in that node. Switches back to default on transition to a node without override.
+- [ ] **Voice library cache.** `GET /api/voices` fetches available voices from ElevenLabs API and caches for 1 hour (avoid hammering their API during workflow editing). Returns `[{ voice_id, name, preview_url, labels }]`.
+- [ ] **Global voice default.** The existing global `ELEVENLABS_VOICE_ID` / per-user voice setting remains the fallback. Per-node voice overrides it only where configured.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### ElevenLabs voices API
+```
+GET https://api.elevenlabs.io/v1/voices
+Headers: xi-api-key: <key>
+→ { voices: [{ voice_id, name, preview_url, labels: { accent, age, gender, ... } }] }
+```
+
+#### Schema change
+```json
+{
+  "id": "greeting",
+  "type": "conversation",
+  "voice_id": "pNInz6obpgDQGcFmaJgB",  // optional override
+  "prompt": "Greet the caller warmly..."
+}
+```
+
+### Implementation tasks
+
+1. **Server — `GET /api/voices`** endpoint with caching (1 hour TTL).
+2. **Server — workflow schema** — add optional `voice_id` to `ConversationNodeData`.
+3. **Server — TTS client** — accept voice_id override per `synthesize()` call.
+4. **Server — pipeline** — pass node's `voice_id` to TTS when present.
+5. **Web — voice picker component** with dropdown + preview button.
+6. **Web — integrate voice picker** into conversation node edit panel.
+7. **Web — audio preview** — play ElevenLabs preview_url in browser.
+8. **Tests** — voice endpoint, schema validation, TTS override, pipeline voice switching.
+
+### Unit tests
+
+- **Server:** `GET /api/voices` returns voice list from ElevenLabs. Second call within 1 hour returns cached data (no HTTP request). Voice cache expires after 1 hour. Schema accepts node with `voice_id`. Schema accepts node without `voice_id`. TTS `synthesize()` uses override voice when provided. Pipeline passes node voice_id to TTS. Pipeline reverts to default voice on next node without override.
+- **Web:** Voice picker renders dropdown with voices from API. Preview button plays audio. "Default" option shown at top. Selected voice saved to node data.
+
+### QA verification
+
+1. Open a workflow → click a conversation node → see Voice dropdown.
+2. Expand dropdown → see list of voices from ElevenLabs.
+3. Click preview → hear the voice sample.
+4. Select a voice → save workflow → call the number → AI uses that voice for that node.
+5. Multiple nodes with different voices → voice switches mid-call as workflow transitions between nodes.
+6. Node without voice override → uses global default voice.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 31 — Contact management (CRM)
+
+As a **business user**, I want **a contact list that automatically captures caller information from conversations**, so that **I can see who's been calling, what they wanted, and build a customer database without manual data entry**.
+
+### Background
+
+Every inbound call already captures the caller's phone number (`from_number`) and the workflow engine extracts key information (name, reason for calling, appointment details) through its `summary_generated` events. This story turns that raw data into a proper contacts system — auto-creating contact records from calls, enriching them with LLM-extracted data, and providing a UI for viewing and managing contacts.
+
+### Acceptance criteria
+
+- [ ] **Contact model.** New `Contact` table: `id`, `user_id`, `phone_number` (unique per user), `name`, `email`, `company`, `tags` (JSON array), `notes` (free text), `custom_fields` (JSON object), `call_count`, `last_called_at`, `created_at`, `updated_at`.
+- [ ] **Auto-creation on inbound call.** When a call starts, look up the contact by `from_number` + `user_id`. If not found, create one with just the phone number. Increment `call_count` and update `last_called_at`.
+- [ ] **Auto-enrichment after call.** When a call ends and `summary_generated` events contain `key_info` (name, email, reason, etc.), update the contact record. Only fill in blank fields — never overwrite user-edited data.
+- [ ] **Contact list page.** New `/contacts` page showing all contacts for the user. Columns: name (or phone if no name), phone number, tags, call count, last called. Sortable by any column. Search by name, phone, or tag.
+- [ ] **Contact detail page.** `/contacts/:id` shows full contact profile + a timeline of all calls from that number. Each call entry shows date, duration, workflow used, outcome, and a summary.
+- [ ] **Manual editing.** Contact detail page has edit mode: update name, email, company, tags, notes, custom fields. Changes saved via `PATCH /api/contacts/:id`.
+- [ ] **Contact CRUD API.** `GET /api/contacts` (list with search/sort/pagination), `GET /api/contacts/:id` (detail with calls), `PATCH /api/contacts/:id` (update), `DELETE /api/contacts/:id` (soft-delete). All scoped to `user_id`.
+- [ ] **Call log links to contact.** Call log entries show the contact name (if known) instead of just the phone number, linked to the contact detail page.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Contact model
+```python
+class Contact(SQLModel, table=True):
+    __tablename__ = "contacts"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    phone_number: str = Field(index=True)
+    name: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    notes: str = ""
+    custom_fields: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    call_count: int = 0
+    last_called_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    deleted_at: Optional[datetime] = None  # soft delete
+```
+
+#### Auto-enrichment flow
+```
+Call ends → collect all summary_generated events for this call
+→ Extract key_info: { caller_name, email, reason, ... }
+→ Lookup Contact by from_number + user_id
+→ For each field: if contact.field is None and key_info has value → update
+→ Save contact
+```
+
+#### Unique constraint
+`UniqueConstraint("user_id", "phone_number")` ensures each user has at most one contact per phone number. Different users can have contacts with the same number (tenant isolation).
+
+### Implementation tasks
+
+1. **Server — `Contact` model** + migration.
+2. **Server — `POST /twilio/media-stream` update** — auto-create/update contact on call start.
+3. **Server — call end hook** — auto-enrich contact from `summary_generated` events.
+4. **Server — `GET /api/contacts`** — list with search, sort, pagination.
+5. **Server — `GET /api/contacts/:id`** — detail with associated calls.
+6. **Server — `PATCH /api/contacts/:id`** — update fields.
+7. **Server — `DELETE /api/contacts/:id`** — soft delete.
+8. **Web — `/contacts` list page** with search bar, sortable table.
+9. **Web — `/contacts/:id` detail page** with profile card + call timeline.
+10. **Web — edit mode** on contact detail with tag editor.
+11. **Web — call log enhancement** — show contact name linked to contact page.
+12. **Web — nav link** to contacts page.
+13. **Tests** — model, auto-creation, auto-enrichment, CRUD, search, tenant isolation.
+
+### Unit tests
+
+- **Server:** Contact auto-created on first call from new number. Contact `call_count` incremented on repeat call. Contact `last_called_at` updated. Auto-enrichment fills blank name from `key_info`. Auto-enrichment does NOT overwrite user-edited name. Contact list filtered by `user_id`. Contact search by name returns matches. Contact search by phone number returns matches. Contact search by tag returns matches. `PATCH` updates only specified fields. `DELETE` sets `deleted_at` (soft delete). Deleted contacts excluded from list. Different users can have contacts with same phone number (tenant isolation). Contact detail includes associated calls ordered by date desc.
+- **Web:** Contact list renders table with columns. Search input filters contacts. Sort by column toggles order. Contact detail shows profile + call timeline. Edit mode saves changes. Tag editor adds/removes tags. Call log shows contact name with link.
+
+### QA verification
+
+1. Make a call from a new number → check `/contacts` → contact auto-created with phone number.
+2. During the call, say "My name is Sarah Johnson" → call ends → contact name populated as "Sarah Johnson".
+3. Edit the contact name to "Sarah J." → make another call saying "This is Sarah Johnson" → name stays "Sarah J." (no overwrite).
+4. Contact detail page shows both calls in the timeline.
+5. Call log shows "Sarah J." instead of the raw phone number.
+6. Search contacts by "Sarah" → found. Search by phone number → found.
+7. Delete a contact → disappears from list. Data preserved in DB (soft delete).
+8. Second user logging in → cannot see first user's contacts (tenant isolation).
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 32 — Caller recognition & context injection
+
+As a **business user**, I want **my AI receptionist to recognise returning callers and greet them by name with awareness of their history**, so that **repeat callers feel valued and don't have to repeat themselves**.
+
+### Background
+
+Story 31 created contact records. This story connects them to the workflow engine so the AI has caller context before the conversation begins. When a known caller rings, their profile and call history are injected into the LLM system prompt. The AI can then say "Welcome back, Sarah! Last time you called about a dental cleaning — are you calling about the same thing?" instead of starting from scratch every time.
+
+### Acceptance criteria
+
+- [ ] **Caller lookup on call start.** When an inbound call arrives, look up the `Contact` by `from_number` + `user_id`. If found, build a caller context object.
+- [ ] **Context injection into workflow engine.** `WorkflowEngine.__init__` accepts an optional `caller_context: dict | None`. When present, it's prepended to the system prompt for the first conversation node: "Known caller information: Name: Sarah Johnson. Called 4 times before. Last called: 2 days ago about dental cleaning. Notes: Prefers morning appointments."
+- [ ] **AI uses context naturally.** The AI greets returning callers by name and references their history when relevant — without sounding robotic or reading out raw data. Controlled via prompt engineering.
+- [ ] **New callers unaffected.** When no contact exists, no context is injected. The AI behaves exactly as before.
+- [ ] **Contact timeline in workflow canvas.** When previewing/testing a workflow, a "Test as contact" dropdown lets the designer pick a contact to simulate the caller context injection. Shows what the AI would see.
+- [ ] **Configurable recognition.** New workflow-level toggle: `"caller_recognition": true/false` (default: true). When false, no context injection even for known callers. Useful for anonymous survey flows or flows where you don't want bias.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Caller context format
+```python
+caller_context = {
+    "name": "Sarah Johnson",
+    "phone": "+447700900123",
+    "email": "sarah@example.com",
+    "company": "Acme Corp",
+    "tags": ["vip", "dental"],
+    "notes": "Prefers morning appointments. Nervous about procedures.",
+    "call_count": 4,
+    "last_called": "2026-02-23",
+    "last_call_summary": "Called about dental cleaning. Booked for March 3rd.",
+    "custom_fields": { "patient_id": "P-12345" }
+}
+```
+
+#### System prompt injection
+Added to the beginning of the first conversation node's system prompt:
+```
+=== CALLER INFORMATION ===
+This is a returning caller. Use this information naturally in your conversation.
+Do NOT read this out verbatim — incorporate it conversationally.
+
+Name: Sarah Johnson
+Previous calls: 4 (last: 2 days ago)
+Last visit reason: Dental cleaning — booked for March 3rd
+Notes: Prefers morning appointments. Nervous about procedures.
+Tags: vip, dental
+===========================
+```
+
+#### Workflow schema addition
+```json
+{
+  "name": "Dental Receptionist",
+  "caller_recognition": true,
+  "nodes": [ ... ]
+}
+```
+
+### Implementation tasks
+
+1. **Server — contact lookup** in `media_stream.py` on call start — fetch contact + last call summary.
+2. **Server — `WorkflowEngine`** — accept `caller_context`, inject into first node's system prompt.
+3. **Server — prompt template** for caller context injection (natural, not robotic).
+4. **Server — workflow schema** — add `caller_recognition` boolean (default `true`).
+5. **Server — pipeline** — pass caller context to workflow engine when contact found and recognition enabled.
+6. **Web — "Test as contact" dropdown** in workflow preview panel.
+7. **Web — `caller_recognition` toggle** in workflow settings.
+8. **Tests** — context injection, prompt formatting, recognition toggle, no-contact fallback.
+
+### Unit tests
+
+- **Server:** Known caller → context injected into system prompt. Unknown caller → no context injected (empty prefix). `caller_recognition: false` → no context even for known caller. Context includes name, call count, last called date, last call summary. Context does NOT include deleted contacts. System prompt contains "CALLER INFORMATION" section for known callers. System prompt does NOT contain "CALLER INFORMATION" for unknown callers. Context built correctly when contact has no name (uses phone number). Last call summary pulled from most recent `summary_generated` event.
+- **Web:** "Test as contact" dropdown populated from contacts API. Selecting a contact shows preview of injected context. `caller_recognition` toggle saves to workflow data.
+
+### QA verification
+
+1. Call from a known number (that has a contact with name) → AI greets by name: "Hi Sarah, welcome back!"
+2. Call from an unknown number → AI gives standard greeting.
+3. Known caller with history → AI references previous call: "Last time you called about X — is this about the same thing?"
+4. Disable `caller_recognition` on the workflow → call from known number → AI gives standard greeting (no recognition).
+5. In workflow editor, select "Test as contact: Sarah Johnson" → preview shows the injected context.
+6. Contact with no name but previous calls → AI says something like "Welcome back! I see you've called before."
+
+### Blocked until answered
+
+- None.
