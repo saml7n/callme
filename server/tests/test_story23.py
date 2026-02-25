@@ -322,8 +322,7 @@ class TestWebhookCallMetadata:
     @pytest.mark.asyncio
     async def test_to_and_from_in_stream_url(self, monkeypatch):
         """Webhook includes To and From as query params in the stream URL."""
-        monkeypatch.setenv("PUBLIC_URL", "https://example.ngrok.io")
-        monkeypatch.setattr("app.twilio.webhook.settings", Settings())
+        monkeypatch.setattr("app.twilio.webhook.get_public_url", lambda: "https://example.ngrok.io")
         monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
 
         transport = ASGITransport(app=app)

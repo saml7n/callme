@@ -9,12 +9,7 @@ from app.main import app
 @pytest.mark.asyncio
 async def test_incoming_returns_twiml_xml(monkeypatch):
     """POST /twilio/incoming returns valid TwiML with a <Connect><Stream> element."""
-    monkeypatch.setenv("PUBLIC_URL", "https://abc123.ngrok.io")
-
-    # Re-import settings so the monkeypatched env var takes effect
-    from app.config import Settings
-
-    monkeypatch.setattr("app.twilio.webhook.settings", Settings())
+    monkeypatch.setattr("app.twilio.webhook.get_public_url", lambda: "https://abc123.ngrok.io")
     # Ensure signature validation is skipped (no auth token)
     monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
 
@@ -35,11 +30,7 @@ async def test_incoming_returns_twiml_xml(monkeypatch):
 @pytest.mark.asyncio
 async def test_incoming_converts_http_to_ws(monkeypatch):
     """HTTP public URLs are converted to ws:// (not wss://)."""
-    monkeypatch.setenv("PUBLIC_URL", "http://localhost:3000")
-
-    from app.config import Settings
-
-    monkeypatch.setattr("app.twilio.webhook.settings", Settings())
+    monkeypatch.setattr("app.twilio.webhook.get_public_url", lambda: "http://localhost:3000")
     # Ensure signature validation is skipped (no auth token)
     monkeypatch.setattr("app.twilio.webhook.get_twilio_auth_token", lambda: "")
 

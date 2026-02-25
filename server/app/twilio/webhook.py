@@ -12,8 +12,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 
-from app.config import settings
 from app.credentials import get_twilio_auth_token
+from app.public_url import get_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +59,18 @@ async def incoming_call(request: Request) -> Response:
     # Validate Twilio signature
     signature = request.headers.get("X-Twilio-Signature", "")
     form_data = dict(await request.form())
-    request_url = str(request.url)
+    # Behind a reverse proxy (nginx/Fly), request.url is the internal URL
+    # (e.g. http://127.0.0.1:3000/...).  Twilio signs against the *public*
+    # webhook URL, so we must reconstruct it for validation.
+    public_url = get_public_url().rstrip("/")
+    request_url = f"{public_url}{request.url.path}"
+    if request.url.query:
+        request_url = f"{request_url}?{request.url.query}"
 
     if not validate_twilio_signature(request_url, form_data, signature):
-        logger.warning("Invalid Twilio signature on /twilio/incoming")
+        logger.warning("Invalid Twilio signature on /twilio/incoming (url=%s)", request_url)
         raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
-    public_url = settings.public_url.rstrip("/")
     # Convert http(s) to ws(s) for the WebSocket URL
     ws_url = public_url.replace("https://", "wss://").replace("http://", "ws://")
 
