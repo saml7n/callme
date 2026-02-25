@@ -1405,15 +1405,15 @@ The existing two-container setup (server + nginx) gets combined into a single Fl
 
 ### Acceptance criteria
 
-- [ ] **Combined Dockerfile.** `Dockerfile.fly` multi-stage build: Node builds the web app → Python serves the API → nginx serves static files + reverse-proxies to uvicorn. Supervisord runs both processes.
-- [ ] **`fly.toml` configuration.** Fly app config with: internal port 8080, HTTPS forced, `auto_stop_machines = false` + `min_machines_running = 1` (always-on for Twilio webhooks), health check on `/health`.
-- [ ] **Persistent volume.** 1GB volume mounted at `/app/data`. `DATABASE_URL=sqlite:///./data/callme.db`. SQLite survives deploys.
-- [ ] **Secrets management.** All API keys set via `fly secrets set`. Never baked into the image.
-- [ ] **PUBLIC_URL auto-detection.** Server detects `FLY_APP_NAME` env var → `https://{FLY_APP_NAME}.fly.dev`. Added as resolution step 2 in `public_url.py` (after explicit env var, before ngrok).
-- [ ] **CORS includes Fly.io URL.** Dynamic CORS picks up the resolved `*.fly.dev` URL automatically (existing `_get_cors_origins()` reads `PUBLIC_URL`).
-- [ ] **Deploy targets.** `make deploy` wraps `fly deploy --ha=false`. `make deploy-setup` runs first-time setup script.
-- [ ] **First-time setup script.** `scripts/fly-setup.sh` handles `fly apps create`, volume creation, secrets import from `.env`, and initial deploy.
-- [ ] **README updated.** Cloud deployment section with prerequisites, first-time setup, subsequent deploys, custom domains, and useful commands.
+- [x] **Combined Dockerfile.** `Dockerfile.fly` multi-stage build: Node builds the web app → Python serves the API → nginx serves static files + reverse-proxies to uvicorn. Supervisord runs both processes.
+- [x] **`fly.toml` configuration.** Fly app config with: internal port 8080, HTTPS forced, `auto_stop_machines = false` + `min_machines_running = 1` (always-on for Twilio webhooks), health check on `/health`.
+- [x] **Persistent volume.** 1GB volume mounted at `/app/data`. `DATABASE_URL=sqlite:///./data/callme.db`. SQLite survives deploys.
+- [x] **Secrets management.** All API keys set via `fly secrets set`. Never baked into the image.
+- [x] **PUBLIC_URL auto-detection.** Server detects `FLY_APP_NAME` env var → `https://{FLY_APP_NAME}.fly.dev`. Added as resolution step 2 in `public_url.py` (after explicit env var, before ngrok).
+- [x] **CORS includes Fly.io URL.** Dynamic CORS picks up the resolved `*.fly.dev` URL automatically (existing `_get_cors_origins()` reads `PUBLIC_URL`).
+- [x] **Deploy targets.** `make deploy` wraps `fly deploy --ha=false`. `make deploy-setup` runs first-time setup script.
+- [x] **First-time setup script.** `scripts/fly-setup.sh` handles `fly apps create`, volume creation, secrets import from `.env`, and initial deploy.
+- [x] **README updated.** Cloud deployment section with prerequisites, first-time setup, subsequent deploys, custom domains, and useful commands.
 
 ### Technical notes
 
