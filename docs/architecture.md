@@ -1,67 +1,63 @@
-# CallMe — AI Receptionist: Architecture & Plan
+# CallMe (Pronto) — Architecture
 
-> **Status:** Active development (Stories 0–23 complete)  
-> **Last updated:** 20 February 2026  
-> **Approach:** Option B — Hybrid (own orchestration + best-in-class services)
+> **Status:** All 25 stories complete, deployed to Fly.io  
+> **Last updated:** 25 February 2026  
+> **Approach:** Hybrid — own orchestration + best-in-class external services
 
 ---
 
-## 1. Vision & End State
+## 1. Vision
 
-CallMe is an AI-powered phone receptionist that:
+CallMe (branded “Pronto” in the UI) is an AI-powered phone receptionist that:
 
 - **Answers inbound calls** on a real phone number via Twilio.
-- **Transcribes caller speech in real time** using Deepgram's streaming STT.
+- **Transcribes caller speech in real time** using Deepgram streaming STT.
 - **Routes conversations through configurable workflows** defined as directed graphs (nodes + edges).
-- **Responds with natural, realistic voice** powered by ElevenLabs TTS.
-- **Lets non-technical users design call flows** in a drag-and-drop React Flow visual builder — no code required.
+- **Responds with natural voice** powered by ElevenLabs TTS.
+- **Lets non-technical users design call flows** in a React Flow visual builder — no code required.
 - **Persists workflows, call logs, and transcripts** for review and iteration.
-
-### What "done" looks like (PoC)
-
-1. A user dials the Twilio number.
-2. The system answers within ~1 second and plays a greeting defined in the active workflow.
-3. The caller speaks; the system transcribes, reasons via LLM, and responds vocally — all within ~800ms round-trip.
-4. The conversation follows a workflow graph: collecting information, looking up data via API calls, transferring to a human, or ending the call.
-5. After the call, a full transcript and metadata are stored and viewable in the dashboard.
-6. An admin can open the workflow builder, rearrange nodes, change prompts/voices, and publish — changes take effect on the next call.
+- **Supports multi-user accounts** with per-user credentials, encrypted at rest.
+- **Integrates with external services** (Google Calendar, webhooks) for real-world actions during calls.
 
 ---
 
 ## 2. System Architecture
 
 ```
-┌─────────────┐       ┌──────────────────────────────────────────────┐
-│   Caller     │       │              CallMe Server (Python)          │
-│  (phone)     │       │                                              │
-│              │  ←──→ │  ┌──────────┐   ┌─────────┐   ┌──────────┐ │
-│              │       │  │ Twilio   │   │Workflow │   │ Call     │ │
-│              │       │  │ WebSocket│──→│ Engine  │──→│ Logger   │ │
-│              │       │  │ Handler  │   │(state   │   │          │ │
-│              │       │  │          │   │ machine)│   └──────────┘ │
-│              │       │  └────┬─────┘   └────┬────┘               │
-│              │       │       │              │                     │
-│              │       │  ┌────▼─────┐   ┌────▼────┐               │
-│              │       │  │ Deepgram │   │ LLM     │               │
-│              │       │  │ STT      │   │(GPT-4o/ │               │
-│              │       │  │(streaming│   │ Claude) │               │
-│              │       │  │ WS)      │   └────┬────┘               │
-│              │       │  └──────────┘        │                     │
-│              │       │                 ┌────▼─────┐               │
-│              │       │                 │ElevenLabs│               │
-│              │       │                 │ TTS      │               │
-│              │       │                 │(μ-law)   │               │
-│              │       │                 └──────────┘               │
-│              │       └──────────────────────────────────────────────┘
+┌─────────────┐       ┌──────────────────────────────────────────────────┐
+│   Caller     │       │              CallMe Server (Python/FastAPI)      │
+│  (phone)     │       │                                                  │
+│              │  ←──→ │  ┌──────────┐   ┌──────────┐   ┌────────────┐  │
+│              │       │  │ Twilio   │   │ Workflow │   │ Call       │  │
+│              │       │  │ WebSocket│──→│ Engine   │──→│ Logger     │  │
+│              │       │  │ Handler  │   │(Router + │   │(DB persist)│  │
+│              │       │  │          │   │Responder)│   └────────────┘  │
+│              │       │  └────┬─────┘   └────┬────┘                   │
+│              │       │       │              │                         │
+│              │       │  ┌────▼─────┐   ┌────▼────┐   ┌────────────┐  │
+│              │       │  │ Deepgram │   │ LLM     │   │ EventBus   │  │
+│              │       │  │ STT      │   │(GPT-4o) │   │(live call  │  │
+│              │       │  │(streaming│   └────┬────┘   │ broadcast) │  │
+│              │       │  │ WS)      │        │        └─────┬──────┘  │
+│              │       │  └──────────┘   ┌────▼─────┐        │         │
+│              │       │                 │ElevenLabs│   ┌────▼──────┐  │
+│              │       │                 │ TTS      │   │ WebSocket │  │
+│              │       │                 │(μ-law)   │   │ /ws/calls │  │
+│              │       │                 └──────────┘   └───────────┘  │
+│              │       └──────────────────────────────────────────────────┘
 │              │
-│              │       ┌──────────────────────────────────────────────┐
-│              │       │           Web Dashboard (React)              │
-│   Admin      │  ←──→ │  ┌──────────────┐  ┌───────────────┐       │
-│  (browser)   │       │  │ React Flow   │  │ Call Logs /   │       │
-│              │       │  │ Workflow     │  │ Transcripts   │       │
-│              │       │  │ Builder      │  │ Viewer        │       │
-│              │       │  └──────────────┘  └───────────────┘       │
-│              │       └──────────────────────────────────────────────┘
+│              │       ┌──────────────────────────────────────────────────┐
+│              │       │           Web Dashboard (React/Vite)             │
+│   Admin      │  ←──→ │  ┌──────────────┐  ┌───────────────┐           │
+│  (browser)   │       │  │ React Flow   │  │ Call Logs /   │           │
+│              │       │  │ Workflow     │  │ Live Calls /  │           │
+│              │       │  │ Builder      │  │ Transcripts   │           │
+│              │       │  └──────────────┘  └───────────────┘           │
+│              │       │  ┌──────────────┐  ┌───────────────┐           │
+│              │       │  │ Setup Wizard │  │ Settings /    │           │
+│              │       │  │              │  │ Integrations  │           │
+│              │       │  └──────────────┘  └───────────────┘           │
+│              │       └──────────────────────────────────────────────────┘
 ```
 
 ### Audio Pipeline (per call, real-time)
@@ -73,35 +69,36 @@ Caller speaks
 Twilio captures μ-law 8kHz audio
     │
     ▼ (bidirectional WebSocket)
-Server receives audio chunks
+Server receives base64 audio chunks
     │
     ▼
-Deepgram STT (streaming WebSocket)
-    │  → interim transcripts (for early processing)
+Deepgram STT (streaming WebSocket, Nova-3)
+    │  → interim transcripts (logged)
     │  → final transcript + speech_final event
     ▼
 Workflow Engine evaluates current node
-    │  → selects system prompt, tools, transition conditions
+    │  → Router LLM: STAY or transition?
+    │  → Responder LLM: generate reply from node instructions
+    │  → May trigger action: end_call, transfer, integration
     ▼
-LLM generates response (GPT-4o / Claude)
-    │  → may trigger tool calls (API lookups, transfers)
-    ▼
-ElevenLabs TTS converts text → μ-law audio
+ElevenLabs TTS converts text → μ-law audio (streaming, sentence-split)
     │
     ▼ (back over bidirectional WebSocket)
 Twilio plays audio to caller
+
+Interruption: if caller speaks during playback → Twilio “clear” message → stop TTS
+Filler phrases: if LLM latency > 1500ms → play pre-cached audio (“One moment…”)
 ```
 
-**Target latency budget:**
+**Latency budget:**
 
 | Stage | Target | Notes |
 |---|---|---|
-| Twilio → Server | ~50ms | WebSocket, negligible |
-| STT (endpointing + final) | ~200-400ms | Deepgram Flux model; tune endpointing sensitivity |
-| LLM inference | ~200-400ms | Streaming response; start TTS before full response |
-| TTS generation | ~150-250ms | ElevenLabs latency-optimized mode (`optimize_streaming_latency=3`) |
-| Server → Twilio | ~50ms | WebSocket, negligible |
-| **Total round-trip** | **~650-1150ms** | Filler phrases ("One moment…") if > 800ms |
+| Twilio ↔ Server | ~50ms | WebSocket, negligible |
+| STT (endpointing + final) | ~200–400ms | Deepgram Nova-3, 300ms endpointing |
+| LLM inference | ~200–400ms | Streaming; TTS starts before full response |
+| TTS generation | ~150–250ms | ElevenLabs `optimize_streaming_latency=3` |
+| **Total round-trip** | **~650–1150ms** | Filler phrases (“One moment…”) if > 800ms |
 
 ---
 
@@ -109,327 +106,361 @@ Twilio plays audio to caller
 
 | Layer | Technology | Why |
 |---|---|---|
-| **Telephony** | Twilio Voice + Media Streams | Industry standard; bidirectional WebSocket streaming; global phone numbers |
-| **STT** | Deepgram (Nova-3 / Flux) | Native WebSocket streaming; lowest latency; endpointing built-in; μ-law support |
-| **LLM** | OpenAI GPT-4o (primary), Claude (swappable) | Function/tool calling for workflow actions; streaming responses |
-| **TTS** | ElevenLabs | Most realistic voices; μ-law output for Twilio; latency-optimized mode |
-| **Server** | Python 3.12+ | Excellent async ecosystem (asyncio); rich AI/ML library support; fast prototyping |
-| **Package manager** | uv | Fast, modern Python package manager; replaces pip/poetry; manages venvs and deps |
-| **Web framework** | FastAPI | Async-native; automatic OpenAPI docs; WebSocket support built-in |
-| **Workflow builder** | React + React Flow (`@xyflow/react`) | De facto standard for node-based visual editors; custom nodes are React components |
-| **Persistence** | SQLite (PoC) → Postgres (prod) | Zero-config for PoC; easy migration path |
-| **ORM** | SQLAlchemy 2.0 + SQLModel | Async support; Pydantic integration via SQLModel |
+| **Telephony** | Twilio Voice + Media Streams | Bidirectional WebSocket streaming; global phone numbers |
+| **STT** | Deepgram (Nova-3) | Native WebSocket streaming; lowest latency; μ-law support |
+| **LLM** | OpenAI GPT-4o + GPT-4o-mini | Tool calling for actions; streaming; mini for routing |
+| **TTS** | ElevenLabs (Flash v2.5) | Realistic voices; μ-law output; latency-optimised mode |
+| **Server** | Python 3.12, FastAPI, uvicorn | Async-native; WebSocket support; OpenAPI docs |
+| **Package manager** | uv | Fast Python package/venv management |
+| **ORM** | SQLAlchemy 2.0 + SQLModel | Pydantic integration; async support |
+| **Database** | SQLite (persistent volume on Fly) | Zero-config; sufficient for PoC; easy migration path to Postgres |
+| **Web framework** | React 19, Vite, TypeScript | Fast dev iteration; HMR |
+| **Workflow builder** | React Flow (`@xyflow/react`) | De facto standard for node-based visual editors |
+| **UI components** | Tailwind CSS + shadcn/ui | Consistent design; accessible primitives |
+| **Auth** | JWT (HS256, 7-day expiry) + bcrypt | Stateless auth; no session store needed |
+| **Encryption** | Fernet (AES-128-CBC + HMAC-SHA256) | Symmetric encryption for credentials at rest |
+| **Deployment** | Fly.io, Docker, nginx, supervisord | Single-command deploy; HTTPS; persistent volumes |
 
 ---
 
-## 4. Workflow System Design
+## 4. Workflow System
 
 ### 4.1 Node Types
 
-Three node types, built incrementally across stories:
-
-| Node Type | Purpose | Config | Built in |
+| Node Type | Purpose | Config | Talks to caller? |
 |---|---|---|---|
-| **Conversation** | Talks to the caller following plain-English instructions. Maintains its own chat history. A Router LLM decides each turn whether to STAY or transition. | `instructions` (str), `examples` (list), `max_iterations` (int) | Story 7 |
-| **Decision** | Pure routing — no conversation with the caller. Evaluates accumulated context and picks an outgoing edge. | `instruction` (str) | Story 8 |
-| **Action** | Performs a side effect (end call, transfer, etc.). Extensible — new action types added over time. | `action_type` (str) + type-specific fields | Story 9 |
+| **Conversation** | Talks to the caller following plain-English instructions. Maintains its own chat history. | `instructions`, `examples`, `max_iterations` | Yes |
+| **Decision** | Pure routing — evaluates accumulated context and picks an outgoing edge. | `instruction` | No (silent) |
+| **Action** | Performs a side effect: end call, transfer, or trigger an integration. | `action_type` + type-specific fields | Plays announcement only |
 
-### 4.2 Two LLM Roles Per Turn
+### 4.2 Dual LLM Roles
 
 Every conversation turn uses two LLM calls:
 
-1. **Router LLM** (cheap/fast, e.g. GPT-4o-mini): Sees the current node, outgoing edge labels (plain English), and conversation history. Returns `STAY` or the ID of the edge to follow. **One call replaces all edge condition evaluation.**
-2. **Responder LLM** (GPT-4o): Sees the current node's `instructions`, `examples`, accumulated summaries from previous nodes, and the current node's chat history. Generates the natural language reply.
+1. **Router LLM** (GPT-4o-mini): Sees the current node, outgoing edge labels, and conversation history. Returns `STAY` or the edge ID to follow. One call evaluates all edges simultaneously.
+2. **Responder LLM** (GPT-4o): Sees the node’s `instructions`, `examples`, accumulated summaries from previous nodes, and the current node’s chat history. Generates the spoken reply.
 
-Decision nodes use only the Router LLM. Action nodes use neither (they execute side effects directly).
+Decision nodes use only the Router. Action nodes use neither (they execute side effects directly).
 
-### 4.3 Per-Node Chat History & Context Passing
+### 4.3 Context Passing
 
-Each conversation node maintains its **own `messages[]`** array — separate from other nodes. When transitioning:
-1. A summary of the outgoing node's conversation is generated via LLM.
-2. Key information is extracted (names, dates, intents, etc.).
+Each conversation node maintains its **own `messages[]`** array. When transitioning:
+
+1. The outgoing node’s conversation is summarised via LLM.
+2. Key information is extracted (names, dates, intents).
 3. The next node receives accumulated `NodeSummary` objects as context prefix.
 
-This keeps per-node LLM context focused and avoids bloat across long multi-node calls.
+This keeps per-node context focused and avoids bloat across long multi-node calls.
 
-### 4.4 Graph Format (JSON)
+### 4.4 Edge Labels
 
-Workflows are stored as a JSON document with `nodes` and `edges`:
+Edges have a plain-English `label` describing when to follow them (e.g., “Caller wants to book an appointment”). The Router LLM interprets these against conversation context — no expression evaluator needed.
 
-```json
-{
-  "id": "wf_001",
-  "name": "Dental Reception",
-  "version": 1,
-  "entry_node_id": "node_1",
-  "nodes": [
-    {
-      "id": "node_1",
-      "type": "conversation",
-      "data": {
-        "instructions": "You are a friendly receptionist for Smile Dental. Greet the caller warmly and ask how you can help today.",
-        "examples": [
-          { "role": "user", "content": "Hi, I'd like to book a cleaning" },
-          { "role": "assistant", "content": "Of course! I'd be happy to help. Could I get your name first?" }
-        ],
-        "max_iterations": 5
-      },
-      "position": { "x": 100, "y": 100 }
-    },
-    {
-      "id": "node_2",
-      "type": "decision",
-      "data": {
-        "instruction": "Determine the caller's primary intent."
-      },
-      "position": { "x": 100, "y": 250 }
-    },
-    {
-      "id": "node_3",
-      "type": "conversation",
-      "data": {
-        "instructions": "Help the caller book a dental appointment. Ask for preferred date, time, and service type.",
-        "examples": [],
-        "max_iterations": 10
-      },
-      "position": { "x": -100, "y": 400 }
-    },
-    {
-      "id": "node_4",
-      "type": "action",
-      "data": {
-        "action_type": "transfer",
-        "target_number": "+441234567890",
-        "announcement": "I'll connect you with our team now. One moment please."
-      },
-      "position": { "x": 300, "y": 400 }
-    },
-    {
-      "id": "node_5",
-      "type": "action",
-      "data": {
-        "action_type": "end_call",
-        "message": "Thank you for calling Smile Dental! Goodbye!"
-      },
-      "position": { "x": -100, "y": 550 }
-    }
-  ],
-  "edges": [
-    { "id": "e1", "source": "node_1", "target": "node_2", "label": "Caller has stated their need" },
-    { "id": "e2", "source": "node_2", "target": "node_3", "label": "Caller wants to book an appointment" },
-    { "id": "e3", "source": "node_2", "target": "node_4", "label": "Caller wants to speak to a person" },
-    { "id": "e4", "source": "node_3", "target": "node_5", "label": "Appointment details confirmed" }
-  ]
-}
-```
+### 4.5 Integration Actions
 
-### 4.5 Edge Labels (replacing typed conditions)
+Action nodes with `action_type: "integration"` invoke external services during calls:
 
-Edges have a plain-English `label` describing when to follow them. The Router LLM interprets these against conversation context — no expression evaluator or per-edge LLM calls needed.
+- **Google Calendar** — check availability, book appointments (via OAuth refresh tokens)
+- **Webhook** — POST/PUT to any URL with JSON payload (5s timeout)
 
-| Old approach (removed) | New approach |
-|---|---|
-| `condition: null` (unconditional) | Edge with a descriptive label; Router picks it when appropriate |
-| `condition: { type: "expression", expr: "..." }` | Not needed — Router LLM handles routing |
-| `condition: { type: "llm", prompt: "..." }` | Edge `label` serves same purpose; Router evaluates all edges in one call |
-
-### 4.6 Workflow Engine (State Machine)
-
-```python
-class WorkflowEngine:
-    workflow: Graph
-    current_node: Node
-    node_histories: dict[str, list[dict]]  # per-node chat histories
-    summaries: list[NodeSummary]           # accumulated across transitions
-
-    async def start() -> str:
-        # Enter entry node, generate initial response via Responder LLM
-
-    async def handle_input(transcript: str) -> tuple[str, bool]:
-        # 1. Append transcript to current node's chat history
-        # 2. Router LLM: STAY or follow edge?
-        # 3a. STAY → Responder LLM generates reply from node instructions + chat history
-        # 3b. TRANSITION → summarise current node, carry forward, enter new node
-        # 4. Check max_iterations → force transition if exceeded
-        # Returns (response_text, call_ended)
-```
+Integration credentials and OAuth tokens are encrypted at rest in the database.
 
 ---
 
-## 5. Implementation Phases
+## 5. Server Architecture
 
-### Phase 1 — Skeleton & Voice Pipeline (Stories 0-6, Week 1-2)
+### 5.1 Module Map
 
-- [x] Project scaffolding: `server/` (Python + FastAPI) and `web/` (React)
-- [x] Twilio account setup: phone number purchased, webhook configured
-- [x] Incoming call webhook → `<Connect><Stream>` TwiML
-- [x] WebSocket server: receive Twilio media events, decode μ-law audio
-- [x] Deepgram STT client (standalone, tested with live audio)
-- [x] LLM client (standalone, streaming + tool calling + structured output)
-- [ ] ElevenLabs TTS client (standalone, μ-law output)
-- [ ] Pipe STT → LLM → TTS end-to-end with hardcoded system prompt
-- [ ] **Milestone:** Make a phone call, have a free-form AI conversation
+```
+server/app/
+├── main.py              # FastAPI app, CORS, startup lifecycle, health endpoint
+├── config.py            # pydantic-settings: all env vars
+├── auth.py              # JWT + API key auth, admin user, get_current_user()
+├── credentials.py       # Runtime credential resolver (user DB → platform env)
+├── crypto.py            # Fernet encryption for credentials at rest
+├── events.py            # In-memory EventBus for live call broadcasting
+├── health.py            # External service health probes (Twilio, DG, 11L, OAI)
+├── pipeline.py          # CallPipeline: orchestrates one call end-to-end
+├── public_url.py        # PUBLIC_URL auto-detection (env → Fly → ngrok → localhost)
+├── seed.py              # Demo data seeder (admin user, sample workflow, fake calls)
+│
+├── api/                 # REST + WebSocket endpoints
+│   ├── auth.py          #   Register, login, me, config-warnings
+│   ├── workflows.py     #   Workflow CRUD, publish, phone assignment
+│   ├── calls.py         #   Call logs (list, detail, live count)
+│   ├── live.py          #   WebSocket live events, cold transfer
+│   ├── settings.py      #   Per-user settings (encrypted), validate
+│   ├── phone_numbers.py #   Phone number CRUD (E.164)
+│   ├── integrations.py  #   Integration CRUD, OAuth flows, calendar picker
+│   ├── templates.py     #   Starter workflow templates
+│   ├── admin.py         #   Reset / seed endpoints
+│   └── platform.py      #   Platform key availability status
+│
+├── db/
+│   ├── models.py        #   SQLModel: User, Workflow, PhoneNumber, Integration,
+│   │                    #     Call, CallEvent, Setting
+│   ├── session.py       #   SQLite engine, init_db(), schema migrations
+│   └── call_logger.py   #   Buffered call event writer
+│
+├── integrations/
+│   ├── google_calendar.py  # Google Calendar v3: availability + booking
+│   └── webhook.py          # Generic webhook caller
+│
+├── llm/
+│   ├── base.py          #   BaseLLMClient protocol (swappable)
+│   └── openai.py        #   OpenAI implementation (streaming, tools, structured)
+│
+├── stt/
+│   └── deepgram.py      #   Deepgram streaming WebSocket STT client
+│
+├── tts/
+│   └── elevenlabs.py    #   ElevenLabs HTTP TTS client (μ-law, streaming)
+│
+├── twilio/
+│   ├── webhook.py       #   POST /twilio/incoming → TwiML (signature validated)
+│   └── media_stream.py  #   WS /twilio/media-stream → CallPipeline
+│
+└── workflow/
+    ├── schema.py        #   Pydantic models for workflow JSON validation
+    └── engine.py        #   WorkflowEngine state machine (Router + Responder)
+```
 
-### Phase 2 — Workflow Engine (Stories 7-9, Week 3-4)
+### 5.2 Call Flow (end-to-end)
 
-- [ ] Conversation nodes: per-node instructions, examples, max_iterations, own chat history
-- [ ] Router LLM (STAY or transition) + Responder LLM (generate reply)
-- [ ] Context passing: node summaries + key info carried between nodes
-- [ ] Decision nodes: pure routing, no caller conversation
-- [ ] Action nodes: end_call, transfer (extensible action_type)
-- [ ] Wire engine into voice pipeline (replaces hardcoded prompt)
-- [ ] **Milestone:** Call follows a multi-node workflow with branching
+```
+1. Twilio receives inbound call to +44...
+2. POST /twilio/incoming
+   → Validate X-Twilio-Signature (auth token + reconstructed public URL)
+   → Return TwiML: <Connect><Stream url="wss://.../twilio/media-stream?to=...&from=...">
+3. Twilio opens bidirectional WebSocket to /twilio/media-stream
+4. media_stream.py:
+   a. Look up PhoneNumber by "to" → find active Workflow → resolve user_id
+   b. Create Call record + CallLogger
+   c. Register call with EventBus (live dashboard)
+   d. Create CallPipeline with per-user credentials
+   e. Pipeline runs: Deepgram STT → WorkflowEngine → ElevenLabs TTS → Twilio audio
+5. On hang-up: CallLogger.finalise(), EventBus.unregister(), pipeline cleanup
+```
 
-### Phase 3 — Persistence & Visual Builder (Stories 10-12, Week 5-6)
+### 5.3 Authentication & Authorisation
 
-- [ ] REST API: workflow CRUD, call logs, event logging
-- [ ] SQLite persistence (workflows survive restarts)
-- [ ] React Flow visual builder: conversation, decision, action nodes
-- [ ] Edge labels editable in the builder
-- [ ] Save/publish workflows from the UI
-- [ ] Call log viewer: transcript timeline, workflow path, node summaries
-- [ ] **Milestone:** Build a workflow in the browser, publish it, call the number, review the logs
+```
+                  ┌─────────────────────────────────────────┐
+                  │              Auth Flow                    │
+                  │                                          │
+                  │  POST /api/auth/register                 │
+                  │    → Create User (email + bcrypt hash)   │
+                  │    → Return JWT (7-day, HS256)           │
+                  │                                          │
+                  │  POST /api/auth/login                    │
+                  │    → Verify password → Return JWT        │
+                  │    → Or: legacy API key login             │
+                  │                                          │
+                  │  All /api/* endpoints:                    │
+                  │    → Authorization: Bearer <jwt>          │
+                  │    → get_current_user() dependency        │
+                  │    → All data scoped by user_id           │
+                  │                                          │
+                  │  Exceptions (no auth required):           │
+                  │    → GET /health                          │
+                  │    → POST /twilio/incoming                │
+                  │    → WS /twilio/media-stream              │
+                  │    → GET /api/auth/check                  │
+                  │    → GET /api/platform/status             │
+                  └─────────────────────────────────────────┘
+```
 
-### Phase 4 — Polish (Story 13, Week 7)
+Admin user is auto-created on startup from `CALLME_API_KEY` (used as both the API key and initial admin password).
 
-- [ ] Interruption handling (clear TTS on caller speech)
-- [ ] Filler phrases for LLM latency
-- [ ] Error handling & graceful degradation
-- [ ] Basic auth on dashboard + Twilio signature validation
-- [ ] **Milestone:** PoC demo-ready
+### 5.4 Credential Resolution
+
+The `credentials.py` resolver provides a single source of truth for all API keys:
+
+1. **User’s DB settings** — encrypted per-user settings stored in the `setting` table.
+2. **Platform env vars** — if the user opted in via `use_platform_keys`, fall back to server-level env vars.
+
+This allows both “bring your own keys” and “platform-managed keys” modes.
+
+### 5.5 Database Schema
+
+```
+User
+  id (UUID PK), email, password_hash, name, created_at
+
+Workflow
+  id (UUID PK), name, version, graph_json, is_active, phone_number, user_id → User
+
+PhoneNumber
+  id (UUID PK), number (E.164), label, workflow_id → Workflow, user_id → User
+
+Integration
+  id (UUID PK), type (google_calendar|webhook), name, config_encrypted, user_id → User
+
+Call
+  id (UUID PK), call_sid, from_number, to_number, workflow_id → Workflow,
+  user_id → User, started_at, ended_at
+
+CallEvent
+  id (UUID PK), call_id → Call, timestamp, event_type (enum), data_json
+
+Setting
+  id (UUID PK), key, user_id → User, value_encrypted
+  (unique constraint on user_id + key)
+```
+
+Event types: `transcript`, `llm_response`, `node_transition`, `summary`, `action`, `error`, `call_started`, `call_ended`, `transfer_started`.
+
+### 5.6 EventBus (Live Calls)
+
+An in-memory pub/sub system for real-time call monitoring:
+
+- `register_call(call_id, metadata)` / `unregister_call(call_id)` — tracks active calls
+- `emit(call_id, event)` — broadcast to all subscribers
+- `subscribe(queue)` / `unsubscribe(queue)` — async queue-based consumers
+
+The `WS /ws/calls/live` endpoint subscribes to the EventBus and streams events (transcript, node transition, call started/ended) to the live dashboard.
 
 ---
 
-## 6. Project Structure (Planned)
+## 6. Web Architecture
+
+### 6.1 Page Map
+
+| Route | Page | Description |
+|---|---|---|
+| `/login` | Login | Email/password + legacy API key |
+| `/register` | Register | Create account |
+| `/setup` | Setup Wizard | 5-step onboarding: Welcome → API Keys → Phone Number → Workflow Template → Publish |
+| `/workflows` | Workflow List | Dashboard with all workflows, status, phone assignment |
+| `/workflows/:id` | Workflow Builder | React Flow drag-and-drop editor with config panel |
+| `/workflows/:id/preview` | Workflow Preview | Read-only flow visualisation |
+| `/calls` | Call List | Paginated call history with status, duration, masking |
+| `/calls/:id` | Call Detail | Full transcript timeline, node breadcrumbs, key info badges |
+| `/calls/live` | Live Calls | Real-time active calls via WebSocket, transfer button |
+| `/settings/phone-numbers` | Phone Numbers | E.164 number management |
+| `/settings/integrations` | Integrations | Google Calendar OAuth, webhook config, test |
+
+### 6.2 Key Components
+
+- **AppShell** — shared layout with nav bar, route outlet, `<LiveCallBanner />`
+- **AuthGuard** — route protection, auto-redirect to `/setup` if not configured
+- **LiveCallBanner** — persistent banner showing active call count via WebSocket
+- **NodePalette** — draggable node types for the workflow builder
+- **ConfigPanel** — right sidebar for editing selected node properties
+- **Custom Nodes** — `ConversationNode` (blue), `DecisionNode` (yellow), `ActionNode` (red)
+
+### 6.3 API Client
+
+The `web/src/lib/api.ts` module provides a typed `fetch` wrapper with JWT auth. Namespaced methods for all resources (workflows, calls, settings, integrations, etc.). Auto-refreshes auth state on 401.
+
+---
+
+## 7. Deployment Architecture
+
+### 7.1 Cloud (Fly.io)
+
+```
+Internet (HTTPS)
+    │
+    ▼
+Fly.io edge proxy (TLS termination)
+    │
+    ▼ port 8080
+nginx (in-container)
+    ├── /                  → serve static React build from /usr/share/nginx/html
+    ├── /api/*             → proxy_pass http://127.0.0.1:3000
+    ├── /health            → proxy_pass http://127.0.0.1:3000
+    ├── /twilio/*          → proxy_pass http://127.0.0.1:3000 (WebSocket upgrade)
+    └── /ws/*              → proxy_pass http://127.0.0.1:3000 (WebSocket upgrade)
+    │
+    ▼ port 3000
+uvicorn (FastAPI)
+    └── SQLite DB on mounted volume (/app/data/callme.db)
+```
+
+Both nginx and uvicorn run under **supervisord** as a single Fly machine process.
+
+Key config:
+- **Region:** `lhr` (London)
+- **Always-on:** `auto_stop_machines = false`, `min_machines_running = 1`
+- **Volume:** 1GB at `/app/data` for SQLite persistence across deploys
+- **Health check:** `GET /health` (fast liveness, no external calls)
+- **Secrets:** all API keys via `fly secrets set` — never in the image
+- **PUBLIC_URL:** auto-detected from `FLY_APP_NAME` env var
+
+### 7.2 Local (Docker Compose)
+
+```
+docker-compose.yml
+├── server (port 3000)    # FastAPI + SQLite volume
+├── web (port 8080)       # nginx serving React build + proxy to server
+└── tunnels (optional)    # ngrok sidecar (--profile tunnel)
+```
+
+### 7.3 Local Dev (no Docker)
+
+- Server: `uv run uvicorn app.main:app --port 3000 --reload`
+- Web: `npm run dev` (Vite on port 5173, proxies API to 3000)
+- Tunnel: `ngrok http 3000` (for Twilio webhooks)
+
+---
+
+## 8. Project Structure
 
 ```
 callme/
 ├── docs/
-│   └── architecture.md          ← you are here
+│   ├── architecture.md       ← this file
+│   ├── stories.md            # All 25 user stories with acceptance criteria
+│   ├── deployment.md         # Deployment guide (Docker, Fly.io, troubleshooting)
+│   ├── development.md        # Development guide (setup, testing, extending)
+│   └── security-audit.md     # Security review with remediation priorities
 ├── server/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app entry point
-│   │   ├── config.py            # Settings via pydantic-settings
-│   │   ├── twilio/
-│   │   │   ├── webhook.py       # TwiML response for incoming calls
-│   │   │   └── media_stream.py  # Bidirectional WebSocket handler
-│   │   ├── stt/
-│   │   │   └── deepgram.py      # Deepgram streaming client
-│   │   ├── llm/
-│   │   │   └── openai.py        # LLM client (swappable)
-│   │   ├── tts/
-│   │   │   └── elevenlabs.py    # ElevenLabs TTS client (μ-law output)
-│   │   ├── workflow/
-│   │   │   ├── engine.py        # State machine — Router + Responder LLM orchestration
-│   │   │   ├── schema.py        # Pydantic models for workflow JSON validation
-│   │   │   └── models.py        # NodeSummary, WorkflowContext dataclasses
-│   │   ├── db/
-│   │   │   ├── models.py        # SQLAlchemy/SQLModel schemas
-│   │   │   └── session.py       # Async DB session factory
-│   │   └── api/
-│   │       ├── workflows.py     # CRUD endpoints for workflows
-│   │       └── calls.py         # Call log endpoints
-│   ├── pyproject.toml
-│   └── requirements.txt
+│   ├── pyproject.toml        # Python deps (uv)
+│   ├── app/                  # Application code (see §5.1)
+│   ├── tests/                # 27 test files, 372+ tests
+│   ├── schemas/
+│   │   ├── examples/         # Sample workflow JSONs
+│   │   └── templates/        # Starter templates for setup wizard
+│   └── scripts/              # QA scripts (qa_deepgram, qa_llm, etc.)
 ├── web/
+│   ├── package.json          # Node deps
+│   ├── vite.config.ts        # Vite config with API proxy
 │   ├── src/
-│   │   ├── App.tsx
-│   │   ├── components/
-│   │   │   ├── flow-builder/
-│   │   │   │   ├── FlowCanvas.tsx       # React Flow canvas
-│   │   │   │   ├── nodes/               # Custom node components
-│   │   │   │   │   ├── GreetingNode.tsx
-│   │   │   │   │   ├── CollectInfoNode.tsx
-│   │   │   │   │   ├── ApiCallNode.tsx
-│   │   │   │   │   ├── TransferNode.tsx
-│   │   │   │   │   └── EndCallNode.tsx
-│   │   │   │   └── panels/
-│   │   │   │       └── NodeConfigPanel.tsx
-│   │   │   └── call-logs/
-│   │   │       └── CallLogViewer.tsx
-│   │   └── api/
-│   │       └── client.ts        # REST client for server API
-│   ├── package.json
-│   └── tsconfig.json
-└── README.md
+│   │   ├── pages/            # Route pages
+│   │   ├── components/       # Reusable components + shadcn primitives
+│   │   ├── hooks/            # Custom hooks (useLiveCallCount)
+│   │   ├── lib/              # API client, types, auth, utils
+│   │   └── test/             # 12 test files, Vitest + RTL
+│   └── public/               # Static assets
+├── fly/
+│   ├── nginx.conf            # nginx config for Fly container
+│   └── supervisord.conf      # Process manager config
+├── scripts/
+│   └── fly-setup.sh          # First-time Fly.io provisioning
+├── Dockerfile.fly            # Multi-stage build for Fly deployment
+├── fly.toml                  # Fly.io app config
+├── docker-compose.yml        # Local Docker quickstart
+├── Makefile                  # dev, test, deploy, seed, reset targets
+├── .env.example              # Environment variable template
+├── copilot-instructions.md   # AI coding assistant context
+└── README.md                 # Quickstart guide
 ```
 
 ---
 
-## 7. Key Reference Documentation
-
-### Twilio
-
-| Resource | URL |
-|---|---|
-| Voice overview | https://www.twilio.com/docs/voice |
-| TwiML `<Connect><Stream>` (bidirectional) | https://www.twilio.com/docs/voice/twiml/connect |
-| Media Streams overview | https://www.twilio.com/docs/voice/media-streams |
-| Media Streams WebSocket messages | https://www.twilio.com/docs/voice/media-streams/websocket-messages |
-| Bidirectional Media Streams guide | https://www.twilio.com/docs/voice/media-streams/bidirectional-media-streams |
-| TwiML `<Start><Stream>` (unidirectional) | https://www.twilio.com/docs/voice/twiml/stream |
-| Buy & configure phone numbers | https://www.twilio.com/docs/phone-numbers |
-
-### Deepgram (STT)
-
-| Resource | URL |
-|---|---|
-| Streaming STT (WebSocket) | https://developers.deepgram.com/docs/getting-started-with-live-streaming-audio |
-| Deepgram Python SDK | https://developers.deepgram.com/docs/python-sdk |
-| Endpointing config | https://developers.deepgram.com/docs/endpointing |
-| Smart formatting | https://developers.deepgram.com/docs/smart-format |
-| Nova-3 / Flux models | https://developers.deepgram.com/docs/models-overview |
-
-### ElevenLabs (TTS)
-
-| Resource | URL |
-|---|---|
-| Text-to-Speech API | https://elevenlabs.io/docs/api-reference/text-to-speech |
-| Streaming TTS (WebSocket) | https://elevenlabs.io/docs/api-reference/text-to-speech/stream |
-| Output formats (μ-law for Twilio) | https://elevenlabs.io/docs/api-reference/text-to-speech#output-format |
-| Voice library | https://elevenlabs.io/docs/voices/voice-library |
-| Latency optimization | https://elevenlabs.io/docs/api-reference/text-to-speech#optimize-streaming-latency |
-
-### OpenAI (LLM)
-
-| Resource | URL |
-|---|---|
-| Chat Completions API | https://platform.openai.com/docs/api-reference/chat |
-| Function / tool calling | https://platform.openai.com/docs/guides/function-calling |
-| Streaming responses | https://platform.openai.com/docs/api-reference/chat/create#chat-create-stream |
-| Structured outputs | https://platform.openai.com/docs/guides/structured-outputs |
-
-### React Flow (Workflow Builder)
-
-| Resource | URL |
-|---|---|
-| Getting started | https://reactflow.dev/learn |
-| Custom nodes | https://reactflow.dev/learn/customization/custom-nodes |
-| Custom edges | https://reactflow.dev/learn/customization/custom-edges |
-| Examples gallery | https://reactflow.dev/examples |
-| API reference | https://reactflow.dev/api-reference |
-| npm package (`@xyflow/react`) | https://www.npmjs.com/package/@xyflow/react |
-
-### Other
-
-| Resource | URL |
-|---|---|
-| FastAPI docs | https://fastapi.tiangolo.com/ |
-| FastAPI WebSockets | https://fastapi.tiangolo.com/advanced/websockets/ |
-| SQLAlchemy 2.0 async | https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html |
-| SQLModel (Pydantic + SQLAlchemy) | https://sqlmodel.tiangolo.com/ |
-| Pydantic Settings | https://docs.pydantic.dev/latest/concepts/pydantic_settings/ |
-| uvicorn (ASGI server) | https://www.uvicorn.org/ |
-| websockets (Python library) | https://websockets.readthedocs.io/ |
-
----
-
-## 8. Environment Variables (anticipated)
+## 9. Environment Variables
 
 ```env
+# Auth & encryption
+CALLME_API_KEY=             # Admin password + legacy API key auth
+CALLME_ENCRYPTION_KEY=      # Auto-generated Fernet key for credential encryption
+
 # Twilio
 TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
+TWILIO_AUTH_TOKEN=          # Used for REST API auth + webhook signature validation
+TWILIO_API_KEY_SID=         # Optional: API key pair (alternative to auth token)
+TWILIO_API_KEY_SECRET=
 TWILIO_PHONE_NUMBER=
 
 # Deepgram
@@ -437,24 +468,66 @@ DEEPGRAM_API_KEY=
 
 # ElevenLabs
 ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
+ELEVENLABS_VOICE_ID=        # Default: 21m00Tcm4TlvDq8ikWAM (Rachel)
 
 # OpenAI
 OPENAI_API_KEY=
 
+# Google OAuth (for Calendar integration)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
 # Server
 PORT=3000
-PUBLIC_URL=         # ngrok or tunnel URL for Twilio webhooks during dev
-DATABASE_URL=       # SQLite file path for PoC
+PUBLIC_URL=                 # Auto-detected on Fly.io; set manually for ngrok
+DATABASE_URL=               # Default: sqlite:///./callme.db
+CALLME_FALLBACK_NUMBER=     # Transfer-to number when errors occur
+
+# Demo
+SEED_DEMO=true              # Auto-seed demo data on startup (Fly default)
 ```
 
 ---
 
-## 9. Open Questions & Decisions
+## 10. Key Design Decisions
 
-- [ ] **LLM streaming into TTS:** Should we stream LLM tokens sentence-by-sentence into ElevenLabs (lower latency, more complex) or wait for the full response (simpler, higher latency)? → Sentence-by-sentence is likely needed to hit the latency target.
-- [ ] **Interruption handling:** When the caller speaks over the AI's response, do we immediately stop TTS playback and process the new input? → Yes for PoC, need to send a `clear` message on the Twilio WebSocket.
-- [ ] **Filler phrases:** Pre-record "One moment please" / "Let me check on that" audio clips, or generate them dynamically? → Pre-record for lower latency.
-- [ ] **Multi-tenancy:** Single business for PoC, but keep the schema tenant-aware from the start?
-- [ ] **Testing without phone calls:** Build a WebSocket test harness (pytest + `httpx` async client) that simulates Twilio media events for local dev.
-- [ ] **Deployment target:** Local dev with ngrok for PoC. Railway / Fly.io / Render for staging.
+| Decision | Choice | Rationale |
+|---|---|---|
+| Single container on Fly | supervisord (nginx + uvicorn) | Simplest; Fly bills per machine; keeps latency minimal |
+| SQLite not Postgres | SQLite on persistent volume | Zero-config; sufficient for PoC; easy to migrate later |
+| Dual LLM (Router + Responder) | GPT-4o-mini routes, GPT-4o responds | Fast routing (~100ms) + quality responses; keeps cost down |
+| JWT not sessions | HS256, 7-day expiry | Stateless; no session store; fits single-server model |
+| Fernet encryption | AES-128 with HMAC | Standard; Python built-in; sufficient for credentials at rest |
+| Per-user credential isolation | DB settings with Fernet | Multi-tenant ready; users can’t see each other’s keys |
+| Sentence-split TTS streaming | Split on `.!?` → parallel TTS | Starts playback before LLM finishes; halves perceived latency |
+| Pre-cached filler phrases | 5 clips warmed at startup | Eliminates TTS latency for “One moment…” when LLM is slow |
+| Event bus (in-process) | async queues, no Redis | Simple; single-machine deployment; no external dependency |
+| Edge labels over typed conditions | Plain English, Router LLM interprets | More flexible; no expression parser; users think in natural language |
+
+---
+
+## 11. External Service Reference
+
+### Twilio
+- [Media Streams (bidirectional WebSocket)](https://www.twilio.com/docs/voice/media-streams/bidirectional-media-streams)
+- [TwiML `<Connect><Stream>`](https://www.twilio.com/docs/voice/twiml/connect)
+- [Request validation](https://www.twilio.com/docs/usage/security#validating-requests)
+
+### Deepgram
+- [Streaming STT (WebSocket)](https://developers.deepgram.com/docs/getting-started-with-live-streaming-audio)
+- [Nova-3 model](https://developers.deepgram.com/docs/models-overview)
+- [Endpointing](https://developers.deepgram.com/docs/endpointing)
+
+### ElevenLabs
+- [Text-to-Speech API](https://elevenlabs.io/docs/api-reference/text-to-speech)
+- [Output formats (μ-law)](https://elevenlabs.io/docs/api-reference/text-to-speech#output-format)
+- [Latency optimisation](https://elevenlabs.io/docs/api-reference/text-to-speech#optimize-streaming-latency)
+
+### OpenAI
+- [Chat Completions](https://platform.openai.com/docs/api-reference/chat)
+- [Tool/function calling](https://platform.openai.com/docs/guides/function-calling)
+- [Structured outputs](https://platform.openai.com/docs/guides/structured-outputs)
+
+### React Flow
+- [Custom nodes](https://reactflow.dev/learn/customization/custom-nodes)
+- [API reference](https://reactflow.dev/api-reference)
