@@ -1,0 +1,49 @@
+# Dockerfile.fly — Combined image for Fly.io deployment
+# Runs nginx (static files + reverse proxy) and uvicorn (API) via supervisord.
+
+# ── Stage 1: Build web static files ──────────────────────────────
+FROM node:20-alpine AS web-build
+
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci
+COPY web/ .
+RUN npm run build
+
+# ── Stage 2: Combined server + nginx ─────────────────────────────
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install nginx, supervisor, and curl (for healthcheck)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx supervisor curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install uv for Python dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy Python dependency files first for layer caching
+COPY server/pyproject.toml ./
+RUN uv sync --no-dev --no-install-project
+
+# Copy server application code
+COPY server/ .
+
+# Copy built web assets
+COPY --from=web-build /app/dist /usr/share/nginx/html
+
+# Copy Fly-specific configs
+COPY fly/nginx.conf /etc/nginx/sites-enabled/default
+COPY fly/supervisord.conf /etc/supervisor/conf.d/callme.conf
+
+# Remove default nginx config that conflicts
+RUN rm -f /etc/nginx/sites-enabled/default.conf 2>/dev/null; \
+    rm -f /etc/nginx/conf.d/default.conf 2>/dev/null
+
+# Create data directory for SQLite volume
+RUN mkdir -p /app/data
+
+EXPOSE 8080
+
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/callme.conf"]

@@ -1390,3 +1390,91 @@ The Docker Compose setup already works but has rough edges for the demo scenario
 ### Blocked until answered
 
 - None — all decisions can be made during implementation.
+
+---
+
+## Story 25 — Cloud deployment (Fly.io)
+
+As a **platform host**, I want **to deploy Pronto to the cloud with a single command**, so that **prospects can access the demo from anywhere without me running it on my laptop**.
+
+### Background
+
+The Docker Compose setup works locally but doesn't help when you need a publicly accessible URL for demos. Fly.io is the easiest cloud platform for this use case: free tier, single `fly deploy` command, built-in HTTPS on `*.fly.dev`, persistent volumes for SQLite, WebSocket support, and zero server management.
+
+The existing two-container setup (server + nginx) gets combined into a single Fly machine running both processes under supervisord.
+
+### Acceptance criteria
+
+- [ ] **Combined Dockerfile.** `Dockerfile.fly` multi-stage build: Node builds the web app → Python serves the API → nginx serves static files + reverse-proxies to uvicorn. Supervisord runs both processes.
+- [ ] **`fly.toml` configuration.** Fly app config with: internal port 8080, HTTPS forced, `auto_stop_machines = false` + `min_machines_running = 1` (always-on for Twilio webhooks), health check on `/health`.
+- [ ] **Persistent volume.** 1GB volume mounted at `/app/data`. `DATABASE_URL=sqlite:///./data/callme.db`. SQLite survives deploys.
+- [ ] **Secrets management.** All API keys set via `fly secrets set`. Never baked into the image.
+- [ ] **PUBLIC_URL auto-detection.** Server detects `FLY_APP_NAME` env var → `https://{FLY_APP_NAME}.fly.dev`. Added as resolution step 2 in `public_url.py` (after explicit env var, before ngrok).
+- [ ] **CORS includes Fly.io URL.** Dynamic CORS picks up the resolved `*.fly.dev` URL automatically (existing `_get_cors_origins()` reads `PUBLIC_URL`).
+- [ ] **Deploy targets.** `make deploy` wraps `fly deploy --ha=false`. `make deploy-setup` runs first-time setup script.
+- [ ] **First-time setup script.** `scripts/fly-setup.sh` handles `fly apps create`, volume creation, secrets import from `.env`, and initial deploy.
+- [ ] **README updated.** Cloud deployment section with prerequisites, first-time setup, subsequent deploys, custom domains, and useful commands.
+
+### Technical notes
+
+#### Combined container approach
+
+Fly.io runs one process per machine. Two processes (nginx + uvicorn) run under **supervisord**:
+
+```
+Dockerfile.fly (multi-stage)
+├── Stage 1: node:20-alpine → npm ci && npm run build
+├── Stage 2: python:3.12-slim
+│   ├── Install nginx, supervisor, curl
+│   ├── Copy web/dist → /usr/share/nginx/html
+│   ├── Copy fly/nginx.conf (proxy to localhost:3000)
+│   ├── Install Python deps via uv
+│   ├── Copy server app
+│   └── CMD ["supervisord", "-n"]
+```
+
+#### Fly.io free tier
+- 3 shared-CPU-1x machines (256MB RAM) — only need 1
+- 1GB persistent volume — plenty for SQLite PoC
+- 160GB outbound transfer/month
+- Built-in TLS on `*.fly.dev`
+
+#### PUBLIC_URL resolution update
+
+New step between env var and ngrok:
+```python
+fly_app = os.environ.get("FLY_APP_NAME")
+if fly_app:
+    return f"https://{fly_app}.fly.dev"
+```
+
+### Implementation tasks
+
+1. **`Dockerfile.fly`** — multi-stage combined image (web build + server + nginx + supervisor).
+2. **`fly.toml`** — Fly app config with health check, volume mount, env vars.
+3. **`fly/supervisord.conf`** — process manager config for nginx + uvicorn.
+4. **`fly/nginx.conf`** — copy of `web/nginx.conf` with `server:3000` → `localhost:3000`, port 8080.
+5. **Server — `public_url.py`** — add `FLY_APP_NAME` detection step.
+6. **`scripts/fly-setup.sh`** — first-time setup: create app, volume, import secrets, deploy.
+7. **Makefile — `make deploy`** and `make deploy-setup` targets.
+8. **README** — cloud deployment section.
+9. **Tests** — `FLY_APP_NAME` detection + precedence in `test_public_url.py`.
+
+### Unit tests
+
+- **Server:** `PUBLIC_URL` returns `https://myapp.fly.dev` when `FLY_APP_NAME=myapp`. Explicit `PUBLIC_URL` takes precedence over Fly detection. CORS includes the Fly URL.
+
+### QA verification
+
+1. `fly deploy` succeeds — image builds, machine starts.
+2. `https://callme-pronto.fly.dev/health` returns 200 with `demo_mode: true`.
+3. `https://callme-pronto.fly.dev/` loads the Pronto web UI.
+4. Login with demo credentials → seeded workflow and call logs visible.
+5. Set Twilio webhook to `https://callme-pronto.fly.dev/twilio/incoming` → call works.
+6. `fly deploy` again → data persists (SQLite on volume).
+7. `make deploy` works end-to-end.
+
+### Blocked until answered
+
+1. ~~Fly.io app name?~~ → `callme-pronto`
+2. ~~Region?~~ → `lhr` (London)

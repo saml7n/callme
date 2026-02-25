@@ -1,0 +1,41 @@
+# Fly.io configuration — https://fly.io/docs/reference/configuration/
+#
+# Deploy:  fly deploy --ha=false
+# First time:  ./scripts/fly-setup.sh
+
+app = "callme-pronto"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile.fly"
+
+[env]
+  DATABASE_URL = "sqlite:///./data/callme.db"
+  SEED_DEMO = "true"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[mounts]
+  source = "callme_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

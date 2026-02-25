@@ -1,4 +1,4 @@
-.PHONY: demo dev test seed reset clean
+.PHONY: demo dev test seed reset clean deploy
 
 # Load .env if it exists (export all vars so sub-processes inherit them)
 ifneq (,$(wildcard .env))
@@ -12,6 +12,13 @@ demo:  ## Start the full stack via Docker Compose (server + web + optional ngrok
 
 demo-tunnel:  ## Start with ngrok tunnel (requires NGROK_AUTHTOKEN)
 	docker compose --profile tunnel up --build
+
+# ─── Cloud deployment ────────────────────────────────────────────
+deploy:  ## Deploy to Fly.io (first time: ./scripts/fly-setup.sh)
+	fly deploy --ha=false
+
+deploy-setup:  ## First-time Fly.io setup (creates app, volume, imports secrets)
+	./scripts/fly-setup.sh
 
 # ─── Local development ────────────────────────────────────────────
 dev:  ## Start server + web locally (no Docker) — auto-seeds if SEED_DEMO=true

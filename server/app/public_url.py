@@ -2,8 +2,9 @@
 
 Resolution order:
 1. ``PUBLIC_URL`` environment variable (if set and non-empty).
-2. ngrok local API at ``http://<NGROK_HOST>:4040/api/tunnels``.
-3. Fallback to ``http://localhost:<PORT>``.
+2. Fly.io auto-detection via ``FLY_APP_NAME`` env var → ``https://<app>.fly.dev``.
+3. ngrok local API at ``http://<NGROK_HOST>:4040/api/tunnels``.
+4. Fallback to ``http://localhost:<PORT>``.
 
 The resolved URL is cached in-process and also stored in the DB settings
 table so other parts of the app (webhook handler, etc.) can read it.
@@ -36,7 +37,14 @@ async def resolve_public_url() -> str:
         logger.info("PUBLIC_URL from env: %s", _resolved_url)
         return _resolved_url
 
-    # 2. ngrok local API
+    # 2. Fly.io auto-detection
+    fly_app = os.environ.get("FLY_APP_NAME")
+    if fly_app:
+        _resolved_url = f"https://{fly_app}.fly.dev"
+        logger.info("PUBLIC_URL from Fly.io: %s", _resolved_url)
+        return _resolved_url
+
+    # 3. ngrok local API
     ngrok_host = os.environ.get("NGROK_HOST", "localhost")
     ngrok_api = f"http://{ngrok_host}:4040/api/tunnels"
     try:
@@ -59,7 +67,7 @@ async def resolve_public_url() -> str:
     except Exception:
         logger.debug("ngrok API not available at %s — skipping", ngrok_api)
 
-    # 3. Fallback
+    # 4. Fallback
     _resolved_url = f"http://localhost:{settings.port}"
     logger.info("PUBLIC_URL fallback: %s", _resolved_url)
     return _resolved_url

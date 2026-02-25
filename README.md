@@ -51,6 +51,61 @@ CallMe supports two modes for API credentials:
 
 ---
 
+## Cloud deployment (Fly.io)
+
+Deploy Pronto to the cloud with a single command. [Fly.io](https://fly.io) provides free HTTPS, persistent volumes for SQLite, and WebSocket support.
+
+### Prerequisites
+
+- [flyctl](https://fly.io/docs/flyctl/install/) installed: `brew install flyctl`
+- A Fly.io account: `fly auth signup`
+
+### First-time setup
+
+```bash
+./scripts/fly-setup.sh
+```
+
+This creates the app, a 1GB persistent volume, imports secrets from your `.env`, and deploys. Your app will be live at **https://callme-pronto.fly.dev**.
+
+### Subsequent deploys
+
+```bash
+make deploy          # or: fly deploy --ha=false
+```
+
+### Configuration
+
+Secrets are managed via `fly secrets`:
+
+```bash
+fly secrets set CALLME_API_KEY=your-key
+fly secrets set OPENAI_API_KEY=sk-...
+fly secrets list
+```
+
+The `PUBLIC_URL` is auto-detected from `FLY_APP_NAME` — no need to set it manually.
+
+### Custom domain
+
+```bash
+fly certs add yourdomain.com
+# Then add a CNAME record: yourdomain.com → callme-pronto.fly.dev
+```
+
+CORS automatically includes the resolved public URL.
+
+### Useful commands
+
+```bash
+fly logs                    # Stream logs
+fly ssh console             # SSH into the machine
+fly status                  # Machine status
+fly volumes list            # Check volume
+```
+
+---
+
 ## Local development
 
 ### Prerequisites
@@ -125,6 +180,9 @@ callme/
 │       ├── lib/         # API client, types, utilities
 │       └── pages/       # Route pages (Setup, Dashboard, Builder, …)
 ├── docs/             # Architecture & story docs
+├── fly/              # Fly.io deployment configs (nginx, supervisord)
+├── scripts/          # Setup & utility scripts
 ├── .env.example      # Environment variable template
+├── fly.toml          # Fly.io app configuration
 └── docker-compose.yml
 ```

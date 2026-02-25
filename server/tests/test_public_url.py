@@ -27,6 +27,28 @@ async def test_resolve_from_env():
 
 
 @pytest.mark.asyncio
+async def test_resolve_from_fly_app_name():
+    """When FLY_APP_NAME is set and PUBLIC_URL is empty, derive the Fly.io URL."""
+    with (
+        patch.object(pub_mod.settings, "public_url", ""),
+        patch.dict("os.environ", {"FLY_APP_NAME": "callme-pronto"}),
+    ):
+        result = await pub_mod.resolve_public_url()
+    assert result == "https://callme-pronto.fly.dev"
+
+
+@pytest.mark.asyncio
+async def test_explicit_public_url_takes_precedence_over_fly():
+    """Explicit PUBLIC_URL env var beats FLY_APP_NAME."""
+    with (
+        patch.object(pub_mod.settings, "public_url", "https://custom.example.com"),
+        patch.dict("os.environ", {"FLY_APP_NAME": "callme-pronto"}),
+    ):
+        result = await pub_mod.resolve_public_url()
+    assert result == "https://custom.example.com"
+
+
+@pytest.mark.asyncio
 async def test_resolve_from_ngrok_api():
     """When PUBLIC_URL is empty but ngrok API returns tunnels, use the https tunnel."""
     mock_resp = MagicMock()
@@ -46,8 +68,11 @@ async def test_resolve_from_ngrok_api():
     with (
         patch.object(pub_mod.settings, "public_url", ""),
         patch("app.public_url.httpx.AsyncClient", return_value=mock_client),
-        patch.dict("os.environ", {"NGROK_HOST": "tunnels"}),
+        patch.dict("os.environ", {"NGROK_HOST": "tunnels"}, clear=False),
     ):
+        # Remove FLY_APP_NAME if present so ngrok path is tested
+        import os
+        os.environ.pop("FLY_APP_NAME", None)
         result = await pub_mod.resolve_public_url()
 
     assert result == "https://abc123.ngrok.io"
@@ -65,7 +90,10 @@ async def test_resolve_fallback_to_localhost():
         patch.object(pub_mod.settings, "public_url", ""),
         patch("app.public_url.httpx.AsyncClient", return_value=mock_client),
         patch.object(pub_mod.settings, "port", 3000),
+        patch.dict("os.environ", {}, clear=False),
     ):
+        import os
+        os.environ.pop("FLY_APP_NAME", None)
         result = await pub_mod.resolve_public_url()
 
     assert result == "http://localhost:3000"
