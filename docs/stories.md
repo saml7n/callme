@@ -43,6 +43,13 @@ Story 25: Cloud deployment (Fly.io)
   → Story 30: Multi-voice & per-node TTS
   → Story 31: Contact management (CRM)
     → Story 32: Caller recognition & context injection
+      → Story 33: Post-call automation (summaries & tasks)
+        → Story 34: SMS & email follow-ups
+        → Story 35: Deal / opportunity pipeline
+          → Story 36: Segments & outbound campaigns (requires Story 28)
+          → Story 37: Lead scoring
+        → Story 38: CRM sync (HubSpot / Salesforce / webhook)
+      → Story 39: Import / export & contact merge
 ```
 
 ---
@@ -2035,6 +2042,583 @@ Tags: vip, dental
 4. Disable `caller_recognition` on the workflow → call from known number → AI gives standard greeting (no recognition).
 5. In workflow editor, select "Test as contact: Sarah Johnson" → preview shows the injected context.
 6. Contact with no name but previous calls → AI says something like "Welcome back! I see you've called before."
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 33 — Post-call automation (AI summaries & follow-up tasks)
+
+As a **business user**, I want **every call to automatically produce a structured summary card and actionable follow-up tasks**, so that **I never have to listen back to calls or manually note down next steps**.
+
+### Background
+
+The workflow engine already generates `summary_generated` events with `key_info` during calls. Story 31 uses these to enrich contact records. This story goes further: at call end, an LLM pass produces a polished summary card (who, what, outcome, next steps) stored against the call, and extracts follow-up tasks with due dates. Tasks appear on a dedicated tasks page and in the contact timeline, giving the business a clear action list from every conversation.
+
+### Acceptance criteria
+
+- [ ] **Post-call summary generation.** When a call ends, collect all `summary_generated` and `transcript` events, send them to the LLM with a summarisation prompt, and store a structured summary: `caller_name`, `reason`, `outcome`, `key_points[]`, `next_steps[]`, `sentiment` (positive/neutral/negative).
+- [ ] **Call summary model.** New `CallSummary` table: `id`, `call_id` (FK, unique), `user_id`, `caller_name`, `reason`, `outcome`, `key_points` (JSON array), `next_steps` (JSON array), `sentiment`, `raw_text` (full LLM output), `created_at`.
+- [ ] **Auto-generated tasks.** Each item in `next_steps` becomes a `Task` record: `title`, `description`, `due_date` (extracted or defaulting to +1 business day), `contact_id`, `call_id`, `user_id`, `status` (open/done/dismissed), `created_at`.
+- [ ] **Task model.** New `Task` table: `id`, `user_id`, `contact_id` (FK nullable), `call_id` (FK nullable), `title`, `description`, `due_date`, `status` (open/done/dismissed), `created_at`, `completed_at`.
+- [ ] **Tasks page.** New `/tasks` page showing open tasks sorted by due date. Filter by status, contact, overdue. Click a task → jump to the linked call or contact.
+- [ ] **Task actions.** Mark done, dismiss (won't do), edit title/due date, create task manually (not just from calls).
+- [ ] **Summary on call detail.** The call detail page shows the structured summary card at the top: reason, outcome, key points, sentiment badge, next steps with task links.
+- [ ] **Contact timeline enrichment.** Contact detail page timeline entries show the summary card (not just "call on Feb 25").
+- [ ] **Tasks API.** `GET /api/tasks` (list, filter, paginate), `GET /api/tasks/:id`, `PATCH /api/tasks/:id` (update status/title/due), `POST /api/tasks` (manual create), `DELETE /api/tasks/:id`. All scoped to `user_id`.
+- [ ] **Summary API.** `GET /api/calls/:id/summary` returns the structured summary. Generated on-demand if not yet created (e.g., for older calls).
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Summarisation prompt
+```
+You are summarising a phone call. Given the transcript and context below,
+produce a JSON object with these fields:
+- caller_name: string (or "Unknown" if not identified)
+- reason: string (one sentence: why they called)
+- outcome: string (one sentence: what happened)
+- key_points: string[] (3-5 bullet points of important information)
+- next_steps: { title: string, due_hint: string }[] (actionable follow-ups)
+- sentiment: "positive" | "neutral" | "negative"
+```
+
+#### Due date extraction
+The LLM returns `due_hint` like "tomorrow", "next Monday", "within a week". A parser converts to a concrete date. Falls back to +1 business day.
+
+#### Background processing
+Summary generation runs asynchronously after the call ends (not in the call pipeline). Uses `asyncio.create_task()` triggered by the call-end event.
+
+### Implementation tasks
+
+1. **Server — `CallSummary` model** + migration.
+2. **Server — `Task` model** + migration.
+3. **Server — post-call summariser** — LLM call with transcript, store `CallSummary`, create `Task` records.
+4. **Server — due date parser** — convert natural language hints to dates.
+5. **Server — `GET /api/calls/:id/summary`** endpoint.
+6. **Server — Tasks CRUD API** (`/api/tasks`).
+7. **Web — call detail summary card** component.
+8. **Web — `/tasks` page** with filters and actions.
+9. **Web — contact timeline** — show summary cards in timeline.
+10. **Web — nav link** to tasks page.
+11. **Tests** — summariser, due date parsing, task CRUD, auth scoping.
+
+### Unit tests
+
+- **Server:** Post-call summariser produces valid `CallSummary` from transcript events. `next_steps` create corresponding `Task` records. Due date parser: "tomorrow" → correct date, "next Monday" → correct date, "within a week" → +7 days, unparseable → +1 business day. Summary endpoint returns stored summary. Summary endpoint triggers generation for calls without summary. Tasks list filtered by status. Tasks list filtered by contact. Task status update (open → done) sets `completed_at`. Manual task creation works without `call_id`. Tasks scoped to `user_id` (tenant isolation). Delete removes task.
+- **Web:** Summary card renders all fields. Sentiment badge shows correct colour (green/grey/red). Tasks page shows open tasks sorted by due date. Overdue tasks highlighted. Mark done button updates status. Task links to call detail and contact.
+
+### QA verification
+
+1. Make a call → hang up → wait 5 seconds → open call detail → summary card appears with reason, outcome, key points.
+2. Check tasks page → follow-up tasks from the call appear with due dates.
+3. Mark a task as done → moves to completed section.
+4. Contact timeline shows summary card for the call.
+5. Old call without summary → click "Generate summary" → summary appears.
+6. Create a manual task → appears in task list.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 34 — SMS & email follow-ups
+
+As a **business user**, I want **my AI receptionist to send SMS or email follow-ups after calls**, so that **callers receive confirmations, reminders, or information without me having to manually send anything**.
+
+### Background
+
+The AI can already say "I'll send you a confirmation" — but it doesn't actually send anything. This story adds a `send_message` action node that triggers SMS (via Twilio, already integrated) or email (via SendGrid or SMTP) during or after a call. Message templates support variable substitution from the call context.
+
+### Acceptance criteria
+
+- [ ] **`send_sms` action node.** New action node type in the workflow schema. Config: `to` (defaults to caller number), `template` (message body with `{{variable}}` placeholders). Sends via Twilio. Result logged as `action_executed` event.
+- [ ] **`send_email` action node.** New action node type. Config: `to_email` (from contact or extracted during call), `subject_template`, `body_template` (with `{{variable}}` placeholders). Sends via SendGrid API or SMTP.
+- [ ] **Template variables.** Available variables: `{{caller_name}}`, `{{caller_number}}`, `{{appointment_date}}`, `{{appointment_time}}`, `{{workflow_name}}`, `{{business_name}}`, plus any `key_info` extracted during the call. Unresolved variables replaced with empty string (not rendered as `{{...}}`).
+- [ ] **Email integration.** New integration type `email` in the integrations system. Config: API key (SendGrid) or SMTP host/port/user/pass. Integration picker in Story 16's UI extended.
+- [ ] **Message log.** Messages sent appear in the contact timeline and call event log. New `EventType.message_sent` event type.
+- [ ] **Web — action node UI.** `send_sms` and `send_email` node types in the workflow builder with template editor. Variable autocomplete in the template text area.
+- [ ] **Retry on failure.** Failed sends retried up to 3 times with exponential backoff (1s, 4s, 16s). Final failure logged as error event.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Twilio SMS
+```python
+client.messages.create(
+    body="Hi Sarah, your appointment is confirmed for March 3rd at 10am.",
+    from_=user_phone_number,
+    to=caller_number,
+)
+```
+
+#### SendGrid
+```python
+import sendgrid
+sg = sendgrid.SendGridAPIClient(api_key)
+message = Mail(from_email, to_email, subject, html_content)
+sg.send(message)
+```
+
+#### Template rendering
+```python
+import re
+
+def render_template(template: str, context: dict[str, str]) -> str:
+    def replacer(match: re.Match) -> str:
+        return context.get(match.group(1), "")
+    return re.sub(r"\{\{(\w+)\}\}", replacer, template)
+```
+
+### Implementation tasks
+
+1. **Server — `send_sms` action** in workflow engine + Twilio send.
+2. **Server — `send_email` action** in workflow engine + SendGrid/SMTP send.
+3. **Server — template renderer** with variable substitution.
+4. **Server — `email` integration type** added to `IntegrationType` enum and integrations API.
+5. **Server — `message_sent` event type** added to `EventType`.
+6. **Server — retry logic** for failed sends.
+7. **Web — `send_sms` node** in workflow builder with template editor.
+8. **Web — `send_email` node** in workflow builder with template editor.
+9. **Web — variable autocomplete** in template text areas.
+10. **Web — email integration setup** in integrations picker.
+11. **Tests** — template rendering, SMS send mock, email send mock, retry, event logging.
+
+### Unit tests
+
+- **Server:** Template renders variables correctly. Unresolved variables replaced with empty string. `send_sms` action calls Twilio with correct body and numbers. `send_email` action calls SendGrid with correct fields. `message_sent` event logged after successful send. Retry: first attempt fails, second succeeds → message sent. Retry: all 3 attempts fail → error event logged. SMS to invalid number → error event (not crash). Email integration config encrypted at rest. Template with no variables renders as-is. Empty template → action skipped with warning.
+- **Web:** `send_sms` node renders in workflow builder. Template editor shows text area with placeholder preview. Variable autocomplete dropdown appears on `{{` input. `send_email` node has subject + body fields. Email integration shows in integration picker.
+
+### QA verification
+
+1. Create workflow with `send_sms` after greeting node → call → receive SMS on caller's phone.
+2. SMS contains correctly substituted caller name and appointment date.
+3. Create workflow with `send_email` → call and provide email address → email received.
+4. Check contact timeline → message_sent events visible.
+5. Disconnect internet → SMS fails → retries → reconnect → eventually succeeds.
+6. Template with unknown variable `{{foo}}` → renders as empty, not `{{foo}}`.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 35 — Deal / opportunity pipeline
+
+As a **business user**, I want **to track sales opportunities and service requests as deals on a visual pipeline**, so that **I can see the value of my leads, track progress through stages, and understand my conversion funnel**.
+
+### Background
+
+Contacts call for a reason — they want a quote, want to book a service, or are considering a purchase. Currently that intent is captured in call summaries but not tracked as a discrete sales/service opportunity. This story adds a deals system with a Kanban pipeline, auto-creating deals from AI-detected intent and letting users manage them through configurable stages.
+
+### Acceptance criteria
+
+- [ ] **Deal model.** New `Deal` table: `id`, `user_id`, `contact_id` (FK), `title`, `description`, `value` (decimal, nullable — estimated deal value), `currency` (default "GBP"), `stage` (string), `stage_order` (int for sorting), `source` ("inbound_call" / "outbound_call" / "manual"), `call_id` (FK nullable — the call that created it), `expected_close_date` (nullable), `closed_at` (nullable), `won` (bool nullable — null=open, true=won, false=lost), `created_at`, `updated_at`.
+- [ ] **Pipeline stages config.** New per-user setting `deal_stages`: a JSON array of stage names (default: `["Lead", "Qualified", "Proposal", "Booked", "Won", "Lost"]`). Users can customise via settings API.
+- [ ] **Auto-deal creation.** After a call ends, if the post-call summary (Story 33) detects commercial intent (asking about pricing, wanting to book, requesting a quote), auto-create a Deal in the "Lead" stage linked to the contact and call. LLM extracts a suggested title and estimated value when possible.
+- [ ] **Pipeline page.** New `/pipeline` page with Kanban columns (one per stage). Each deal card shows title, contact name, value, age. Drag-and-drop between stages. Click card → deal detail panel.
+- [ ] **Deal detail.** Side panel or page showing: title, description, contact link, value, stage, expected close date, source call link, activity timeline (stage changes, notes, linked calls).
+- [ ] **Deal CRUD API.** `GET /api/deals` (list with stage/contact filter), `GET /api/deals/:id`, `POST /api/deals` (manual create), `PATCH /api/deals/:id` (update stage, value, etc.), `DELETE /api/deals/:id`. All scoped to `user_id`.
+- [ ] **Pipeline summary.** `/pipeline` page header shows: total open deals, total value by stage, conversion rate (deals won / total closed), average time in pipeline.
+- [ ] **Deal stage history.** `DealEvent` table: `id`, `deal_id`, `event_type` (stage_changed, note_added, call_linked), `from_value`, `to_value`, `timestamp`. Every stage change is logged.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Intent detection prompt (extends Story 33 summariser)
+Add to the post-call summarisation prompt:
+```
+Also determine if this call has commercial intent. If the caller is:
+- asking about pricing or costs
+- wanting to book or schedule a service
+- requesting a quote or estimate
+- expressing interest in purchasing
+
+Return: deal_detected: true/false, deal_title: string, deal_value_estimate: number|null
+```
+
+#### Kanban library
+Use `@hello-pangea/dnd` (maintained fork of `react-beautiful-dnd`) for drag-and-drop. Already React 19 compatible.
+
+### Implementation tasks
+
+1. **Server — `Deal` model** + `DealEvent` model + migration.
+2. **Server — deal stages setting** — default stages, user-configurable.
+3. **Server — auto-deal creation** — extend post-call summariser to detect intent + create deal.
+4. **Server — Deals CRUD API** (`/api/deals`).
+5. **Server — pipeline summary endpoint** (`GET /api/deals/summary`).
+6. **Server — deal stage change logging** in `DealEvent`.
+7. **Web — install `@hello-pangea/dnd`.**
+8. **Web — `/pipeline` page** with Kanban board.
+9. **Web — deal card component** with drag-and-drop.
+10. **Web — deal detail panel** with activity timeline.
+11. **Web — pipeline summary header.**
+12. **Web — nav link** to pipeline page.
+13. **Tests** — model, auto-creation, intent detection, CRUD, stage history, auth scoping.
+
+### Unit tests
+
+- **Server:** Deal auto-created when summary has `deal_detected: true`. Deal NOT created when `deal_detected: false`. Deal linked to correct contact and call. Deal `stage` defaults to first stage in user's config. Stage change creates `DealEvent`. Pipeline summary returns correct totals. Deals filtered by stage. Deals filtered by contact. Manual deal creation works. Deal update changes `updated_at`. Won/lost sets `closed_at` + `won` flag. Deals scoped to `user_id`. Custom stages used when configured. Default stages used when not configured.
+- **Web:** Kanban renders one column per stage. Deal cards appear in correct columns. Drag card to new column updates stage via API. Pipeline summary shows correct totals. Deal detail panel opens on card click. Contact name links to contact page.
+
+### QA verification
+
+1. Call and ask about pricing → hang up → check pipeline → new deal in "Lead" stage with auto-generated title.
+2. Drag the deal to "Qualified" → stage updates, event logged.
+3. Click deal card → detail panel shows contact, call link, stage history.
+4. Create a manual deal → appears in pipeline.
+5. Mark deal as Won → moves to Won column, `closed_at` set.
+6. Pipeline header shows total value and conversion rate.
+7. Settings → customise deal stages → pipeline columns update.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 36 — Contact segments & outbound campaigns
+
+As a **business user**, I want **to group contacts into segments and run bulk outbound call campaigns**, so that **I can do appointment reminders, follow-up calls, and proactive outreach at scale using my AI workflows**.
+
+### Background
+
+Story 28 added outbound calls (one at a time). Story 31/32 added contacts with tags and history. This story combines them: define a segment of contacts using filters (tags, deal stage, recency, custom fields), then launch a campaign that calls each contact in the segment using a selected workflow. Campaigns run with configurable concurrency and schedule windows.
+
+### Acceptance criteria
+
+- [ ] **Segment model.** New `Segment` table: `id`, `user_id`, `name`, `filter_json` (the filter criteria as JSON), `contact_count` (cached count), `created_at`, `updated_at`.
+- [ ] **Segment filters.** Filters support: `tags` (has any/all of), `deal_stage` (in list), `last_called_before` / `last_called_after` (date), `call_count_min` / `call_count_max`, `custom_field` (key=value), `created_before` / `created_after`. Filters are AND-combined.
+- [ ] **Segment preview.** `GET /api/segments/:id/preview` returns the matching contacts (paginated) so the user can verify before launching a campaign.
+- [ ] **Campaign model.** New `Campaign` table: `id`, `user_id`, `name`, `segment_id` (FK), `workflow_id` (FK), `status` (draft/running/paused/completed/cancelled), `concurrency` (max simultaneous calls, default 1), `schedule_start` / `schedule_end` (time-of-day window, e.g. 09:00-17:00), `total_contacts`, `called_count`, `completed_count`, `failed_count`, `created_at`, `started_at`, `completed_at`.
+- [ ] **Campaign execution.** When started, the campaign iterates through segment contacts, initiating outbound calls (Story 28) respecting concurrency limits and schedule windows. Pausing stops new calls (in-progress calls finish). Cancelling stops everything.
+- [ ] **Campaign progress.** `GET /api/campaigns/:id` returns real-time progress (called/completed/failed counts). Web UI shows a progress bar.
+- [ ] **Campaign results.** After completion, `GET /api/campaigns/:id/results` returns per-contact outcome (answered, no-answer, busy, completed, errored).
+- [ ] **Segments page.** `/segments` page listing saved segments with contact count. Create/edit segment UI with filter builder.
+- [ ] **Campaigns page.** `/campaigns` page listing campaigns with status, progress, actions (start/pause/cancel). Campaign detail page with results table.
+- [ ] **Do-not-call list.** Contacts can be flagged `do_not_call: true`. Campaigns skip them automatically. Flag editable on contact detail.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Filter query builder
+```python
+def build_segment_query(filters: dict, user_id: UUID) -> Select:
+    query = select(Contact).where(Contact.user_id == user_id, Contact.deleted_at.is_(None))
+    if tags := filters.get("tags"):
+        # JSON array contains any of the specified tags
+        for tag in tags:
+            query = query.where(Contact.tags.contains(tag))
+    if stage := filters.get("deal_stage"):
+        query = query.join(Deal).where(Deal.stage.in_(stage))
+    if before := filters.get("last_called_before"):
+        query = query.where(Contact.last_called_at < before)
+    # ... etc
+    return query
+```
+
+#### Campaign executor
+Runs as a background `asyncio.Task`. Uses a semaphore for concurrency control. Checks schedule window before each call. Respects pause/cancel signals via a shared state flag.
+
+### Implementation tasks
+
+1. **Server — `Segment` model** + migration.
+2. **Server — `Campaign` model** + `CampaignContact` (per-contact result) model + migration.
+3. **Server — segment filter query builder.**
+4. **Server — Segments CRUD API** (`/api/segments`) + preview endpoint.
+5. **Server — Campaigns CRUD API** (`/api/campaigns`) + start/pause/cancel actions.
+6. **Server — campaign executor** (background task with concurrency control).
+7. **Server — do-not-call flag** on Contact model.
+8. **Web — `/segments` page** with filter builder UI.
+9. **Web — `/campaigns` page** with list, detail, progress bar.
+10. **Web — campaign launch wizard** (pick segment → pick workflow → set concurrency/schedule → start).
+11. **Web — do-not-call toggle** on contact detail.
+12. **Tests** — filter builder, campaign lifecycle, concurrency, schedule window, do-not-call skip.
+
+### Unit tests
+
+- **Server:** Segment filter by tag returns correct contacts. Filter by `last_called_before` returns only stale contacts. Filter by `deal_stage` joins correctly. Multiple filters AND-combined. Segment preview returns paginated results. Campaign creation with valid segment succeeds. Campaign start initiates outbound calls. Campaign respects concurrency limit (semaphore). Campaign pauses: no new calls started, in-progress finish. Campaign cancel: stops immediately. Campaign skips `do_not_call` contacts. Campaign respects schedule window (no calls outside hours). Campaign results track per-contact outcome. Segments and campaigns scoped to `user_id`.
+- **Web:** Segment builder renders filter options. Adding a filter shows preview count. Campaign list shows status badges. Progress bar updates during campaign. Start/pause/cancel buttons work. Do-not-call toggle on contact detail saves.
+
+### QA verification
+
+1. Create a segment: "contacts tagged 'dental' who haven't called in 30+ days" → preview shows matching contacts.
+2. Create a campaign with that segment + appointment reminder workflow → start → contacts receive calls.
+3. Pause campaign → no new calls start. Resume → continues.
+4. Flag a contact as do-not-call → they're skipped in the next campaign.
+5. Campaign completes → results page shows per-contact outcomes.
+6. Set schedule window 09:00-17:00 → calls outside hours are deferred.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 37 — Lead scoring
+
+As a **business user**, I want **contacts automatically scored by engagement and intent signals**, so that **I can prioritise high-value leads and my AI can treat VIP callers differently**.
+
+### Background
+
+With contacts, call history, deals, and AI-extracted intent, we have rich signals to score leads. This story adds a configurable scoring engine that auto-calculates a score for each contact and exposes it in the UI, API, and caller recognition context (Story 32). The score updates after every call and deal change.
+
+### Acceptance criteria
+
+- [ ] **Score field on Contact.** `Contact` model gains `score: int = 0` and `score_breakdown: dict` (JSON — shows which rules contributed what points).
+- [ ] **Scoring rules config.** Per-user setting `scoring_rules`: a JSON array of rules. Default rules:
+  - Call frequency: 1-2 calls = +10, 3-5 = +25, 6+ = +40
+  - Recency: called in last 7 days = +20, last 30 days = +10, older = 0
+  - Duration: avg call > 2 min = +15 (engaged caller)
+  - Deal value: has deal > £500 = +25, > £1000 = +40
+  - Deal stage: Qualified+ = +15, Proposal+ = +25
+  - Sentiment: positive = +10, negative = -10
+  - Tags: "vip" tag = +50
+- [ ] **Auto-recalculation.** Score recalculated after: call ends, deal stage changes, contact edited (tags/notes). Runs asynchronously (not blocking the call).
+- [ ] **Score tiers.** Contacts labelled: Hot (80+), Warm (40-79), Cold (0-39). Tier shown as a badge on contact list and detail pages.
+- [ ] **Sorted by score.** Contact list page default sort: score descending (hottest leads first). Sort toggle for other columns still available.
+- [ ] **Score in caller context.** Story 32's caller recognition context includes the score and tier, so the AI can say: "I see you're one of our valued customers" for hot leads.
+- [ ] **Scoring rules editor.** Settings page section to edit scoring rules. Each rule: condition, points, description. Preview button shows how rules affect the top 10 contacts.
+- [ ] **Score history.** Track score over time (daily snapshot) for trend analysis. Optional sparkline on contact card.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Scoring engine
+```python
+def calculate_score(contact: Contact, rules: list[dict], user_id: UUID) -> tuple[int, dict]:
+    score = 0
+    breakdown = {}
+    for rule in rules:
+        points = evaluate_rule(rule, contact)
+        if points:
+            score += points
+            breakdown[rule["name"]] = points
+    return max(0, score), breakdown  # floor at 0
+```
+
+#### Default rules schema
+```json
+[
+  { "name": "call_frequency", "type": "call_count", "tiers": [{"min": 1, "max": 2, "points": 10}, {"min": 3, "max": 5, "points": 25}, {"min": 6, "points": 40}] },
+  { "name": "recency", "type": "last_called_days", "tiers": [{"max": 7, "points": 20}, {"max": 30, "points": 10}] },
+  { "name": "vip_tag", "type": "has_tag", "tag": "vip", "points": 50 }
+]
+```
+
+### Implementation tasks
+
+1. **Server — Contact model** — add `score` and `score_breakdown` fields.
+2. **Server — scoring engine** — evaluate rules against contact data.
+3. **Server — auto-recalculation triggers** — after call end, deal change, contact edit.
+4. **Server — scoring rules setting** — per-user, with defaults.
+5. **Server — score history** — daily snapshot table + background task.
+6. **Server — caller context** — include score/tier in Story 32's context injection.
+7. **Web — score badge** (Hot/Warm/Cold) on contact list and detail.
+8. **Web — contact list** default sort by score.
+9. **Web — scoring rules editor** in settings.
+10. **Web — score sparkline** on contact card (optional).
+11. **Tests** — scoring engine, rule evaluation, tier assignment, recalculation triggers.
+
+### Unit tests
+
+- **Server:** Score calculated correctly for contact with 3 calls → 25 points from call_frequency. Recency within 7 days → +20. VIP tag → +50. Combined score sums all rules. Score floor at 0 (negative rules don't go below zero). Score breakdown shows per-rule contributions. Score recalculated after call ends. Score recalculated after deal stage change. Custom rules override defaults. Empty rules → score 0. Tier assignment: 80+ = Hot, 40-79 = Warm, 0-39 = Cold. Caller context includes score and tier.
+- **Web:** Score badge renders with correct color (red/orange/blue). Contact list sorted by score by default. Rules editor shows current rules. Rules preview shows updated scores.
+
+### QA verification
+
+1. New contact with 1 call → score badge shows "Cold".
+2. Same contact calls 4 more times → score increases → badge changes to "Warm".
+3. Add "vip" tag → score jumps by 50 → badge changes to "Hot".
+4. Call from hot lead → AI greeting references VIP status.
+5. Settings → edit scoring rules → change VIP points to 100 → scores recalculate.
+6. Contact list shows hottest leads at top.
+
+### Blocked until answered
+
+- None.
+
+---
+
+## Story 38 — CRM sync (HubSpot / Salesforce / webhook)
+
+As a **business user**, I want **my contacts, calls, and deals to sync with my existing CRM**, so that **Pronto integrates into my existing sales workflow instead of being a data silo**.
+
+### Background
+
+Many businesses already use HubSpot or Salesforce. Pronto's contacts and deals are valuable, but only if they flow into the team's existing CRM. This story adds three sync tiers: (1) generic webhook for Zapier/Make-compatible automation, (2) HubSpot native integration, (3) Salesforce native integration. All are one-way push by default (Pronto → CRM) with optional pull for contact enrichment.
+
+### Acceptance criteria
+
+- [ ] **Webhook sync.** New integration type `crm_webhook`. Config: `url`, `events[]` (contact_created, contact_updated, call_completed, deal_created, deal_stage_changed), `secret` (HMAC signing). POSTs a JSON payload to the URL when matching events occur. Includes HMAC signature header for verification.
+- [ ] **HubSpot sync.** New integration type `hubspot`. Config: `api_key` or OAuth token. Mappings: Contact → HubSpot Contact (phone, name, email, company, custom properties for tags/score), Call → HubSpot Engagement (call type, duration, notes=summary), Deal → HubSpot Deal (title, amount, stage mapping).
+- [ ] **Salesforce sync.** New integration type `salesforce`. Config: OAuth credentials (connected app). Mappings: Contact → Salesforce Contact/Lead, Call → Salesforce Task (subject="Phone Call", description=summary), Deal → Salesforce Opportunity.
+- [ ] **Sync configuration UI.** Integration setup page for each CRM. Field mapping editor: which Pronto fields map to which CRM fields. Test connection button.
+- [ ] **Sync queue.** Events queued and processed asynchronously. Failed syncs retried with exponential backoff (3 attempts). Sync log viewable in admin.
+- [ ] **Sync status on records.** Contact and deal detail pages show sync status: "Synced to HubSpot 2 min ago" / "Sync failed (retry pending)". Link to external CRM record.
+- [ ] **Conflict resolution.** On push: Pronto data overwrites CRM (last-write-wins). Optional: pull CRM updates on a schedule (hourly) to enrich Pronto contacts with data entered in the CRM.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### Webhook payload
+```json
+{
+  "event": "contact_updated",
+  "timestamp": "2026-02-26T10:30:00Z",
+  "data": {
+    "id": "uuid",
+    "phone_number": "+447...",
+    "name": "Sarah Johnson",
+    "email": "sarah@example.com",
+    "score": 75,
+    "tags": ["dental", "vip"]
+  }
+}
+```
+Signed with `HMAC-SHA256(secret, body)` in `X-Pronto-Signature` header.
+
+#### HubSpot API
+```python
+# Create/update contact
+httpx.post("https://api.hubapi.com/crm/v3/objects/contacts", headers={"Authorization": f"Bearer {token}"}, json={
+    "properties": {"phone": contact.phone_number, "firstname": first, "lastname": last, "email": contact.email}
+})
+```
+
+#### Sync queue
+Use an in-process `asyncio.Queue` with persistent fallback (store pending syncs in a `SyncJob` table so they survive restarts).
+
+### Implementation tasks
+
+1. **Server — `SyncJob` model** — queue table: `id`, `integration_id`, `event_type`, `payload_json`, `status`, `attempts`, `last_error`, `created_at`, `completed_at`.
+2. **Server — sync dispatcher** — emits events on contact/call/deal changes, queues `SyncJob`s.
+3. **Server — webhook sync handler** — POST payload + HMAC signature.
+4. **Server — HubSpot sync handler** — map + push contacts, calls, deals.
+5. **Server — Salesforce sync handler** — map + push contacts, calls, deals.
+6. **Server — sync worker** — background task processing the queue with retry.
+7. **Server — `crm_webhook`, `hubspot`, `salesforce` integration types.**
+8. **Web — CRM integration setup pages** (one per provider).
+9. **Web — field mapping editor** component.
+10. **Web — sync status badge** on contact/deal detail pages.
+11. **Web — sync log viewer** in admin area.
+12. **Tests** — webhook delivery, HMAC signing, HubSpot/Salesforce API mocks, retry logic, queue persistence.
+
+### Unit tests
+
+- **Server:** Webhook sync sends POST with correct payload. HMAC signature verifiable with secret. HubSpot sync creates contact via API. HubSpot sync maps Pronto fields to HubSpot properties. Salesforce sync creates Lead via API. Sync job queued on contact update. Sync job retried on failure (up to 3). Sync job marked failed after 3 attempts. Sync queue survives restart (persisted in DB). Event filtering: only configured events trigger sync. Sync scoped to user's integration (not global).
+- **Web:** CRM setup page renders for each provider. Test connection button shows success/error. Field mapping editor saves configuration. Sync status badge shows correct state. Sync log shows recent events.
+
+### QA verification
+
+1. Set up webhook integration with a RequestBin URL → make a call → webhook fires with contact + call data.
+2. Set up HubSpot integration → make a call → contact appears in HubSpot, call logged as engagement.
+3. Create a deal → appears in HubSpot as a deal with correct stage mapping.
+4. Webhook with wrong URL → sync fails → retry 3 times → marked as failed in sync log.
+5. Contact detail shows "Synced to HubSpot 1 min ago".
+6. Disconnect HubSpot → contact detail shows "Sync failed" with error details.
+
+### Blocked until answered
+
+1. Which CRM integrations to prioritise? → Recommend webhook + HubSpot first, Salesforce as follow-up.
+
+---
+
+## Story 39 — Import / export & contact merge
+
+As a **business user**, I want **to import my existing contacts from a CSV, export my data for backup, and merge duplicate contacts**, so that **I can migrate to Pronto from my current system and keep my data clean**.
+
+### Background
+
+Businesses switching to Pronto have existing customer databases. Without import, they start with an empty contact list and lose the ability to recognise returning callers (Story 32). This story adds CSV import with column mapping, CSV/JSON export for portability, duplicate detection, and a merge UI for combining contacts that represent the same person (e.g., called from two different numbers).
+
+### Acceptance criteria
+
+- [ ] **CSV import.** `POST /api/contacts/import` accepts a CSV file upload. Step 1: parse headers and return them. Step 2: user maps CSV columns to Contact fields (phone_number, name, email, company, tags). Step 3: validate and create contacts. Report: created, skipped (duplicate phone), errored (invalid data).
+- [ ] **Import UI.** `/contacts/import` page: drag-and-drop CSV upload → column mapping screen with dropdowns → preview of first 5 rows → confirm → progress bar → results summary.
+- [ ] **Duplicate detection on import.** Contacts with a phone number already in the user's contacts are skipped (not overwritten). Report shows which rows were skipped and why.
+- [ ] **CSV export.** `GET /api/contacts/export?format=csv` downloads all contacts as CSV. `format=json` returns JSON array. Includes all fields: phone, name, email, company, tags, score, call_count, last_called, notes.
+- [ ] **JSON export of everything.** `GET /api/export/full` (admin-only) exports all user data: contacts, calls, deals, tasks, workflows. For backup/migration.
+- [ ] **Duplicate detection.** `GET /api/contacts/duplicates` returns groups of contacts that might be duplicates: same name different numbers, similar phone numbers (e.g., with/without country code), same email. Scored by confidence.
+- [ ] **Contact merge.** `POST /api/contacts/merge` accepts `{ primary_id, secondary_ids[] }`. Merges secondary contacts into primary: combines call history, takes the most complete field values, sums call_count, keeps all tags (union). Secondary contacts soft-deleted.
+- [ ] **Merge UI.** `/contacts/duplicates` page showing potential duplicate groups. "Merge" button per group opens a comparison view: side-by-side fields, pick which value to keep, confirm merge.
+- [ ] **All existing tests still pass.**
+
+### Technical notes
+
+#### CSV parsing
+Use Python's built-in `csv` module. Detect encoding with `chardet` (or assume UTF-8 with latin-1 fallback). Limit file size to 5MB / 10,000 rows.
+
+#### Column mapping
+```json
+{
+  "mappings": {
+    "Phone Number": "phone_number",
+    "Full Name": "name",
+    "Email Address": "email",
+    "Company": "company",
+    "Tags": "tags"
+  }
+}
+```
+
+#### Merge logic
+```python
+def merge_contacts(primary: Contact, secondaries: list[Contact]) -> Contact:
+    for s in secondaries:
+        # Take non-null fields from secondary if primary is blank
+        if not primary.name and s.name:
+            primary.name = s.name
+        if not primary.email and s.email:
+            primary.email = s.email
+        # Combine tags (union)
+        primary.tags = list(set(primary.tags + s.tags))
+        # Sum call counts
+        primary.call_count += s.call_count
+        # Re-point all calls from secondary to primary
+        update_calls(s.phone_number, primary.id)
+        # Soft-delete secondary
+        s.deleted_at = utcnow()
+    return primary
+```
+
+#### Duplicate detection heuristics
+1. **Exact phone match** (after normalising to E.164) — confidence: 100%
+2. **Same name + different phone** — confidence: 70%
+3. **Same email** — confidence: 90%
+4. **Phone differs only by country code** (+447... vs 07...) — confidence: 95%
+
+### Implementation tasks
+
+1. **Server — CSV import endpoint** — upload, parse, column mapping, create contacts.
+2. **Server — CSV/JSON export endpoint.**
+3. **Server — full export endpoint** (admin-only).
+4. **Server — duplicate detection** — query for potential duplicates.
+5. **Server — contact merge endpoint** — merge logic, re-point calls, soft-delete.
+6. **Server — phone number normalisation** — E.164 canonicalisation for matching.
+7. **Web — `/contacts/import` page** with drag-and-drop + column mapper.
+8. **Web — export buttons** on contacts page (CSV, JSON).
+9. **Web — `/contacts/duplicates` page** with merge comparison UI.
+10. **Tests** — import, export, duplicate detection, merge, phone normalisation.
+
+### Unit tests
+
+- **Server:** CSV import creates contacts for valid rows. Import skips rows with duplicate phone numbers. Import reports error for rows missing phone number. Import handles various CSV encodings. Column mapping correctly assigns fields. Export CSV contains all contacts with correct headers. Export JSON returns valid array. Duplicate detection finds same-name-different-phone pairs. Duplicate detection finds phone-with/without-country-code pairs. Merge re-points calls from secondary to primary. Merge combines tags (union, no duplicates). Merge sums call_count. Merge fills blank fields from secondary. Merge soft-deletes secondary contacts. Merge doesn't overwrite non-blank primary fields. Phone normalisation: "07700900123" → "+447700900123". Phone normalisation: "+447700900123" unchanged. Import limited to 10,000 rows. Full export requires admin.
+- **Web:** Import page shows drag-and-drop zone. File upload shows column mapping screen. Mapping dropdowns list Contact fields. Preview shows first 5 rows mapped. Results summary shows created/skipped/error counts. Export button triggers download. Duplicates page shows merge groups. Comparison view shows side-by-side fields. Merge button confirms and refreshes list.
+
+### QA verification
+
+1. Export current contacts as CSV → open in Excel → all data present.
+2. Edit the CSV → add 5 new rows + 2 duplicates → import → 5 created, 2 skipped.
+3. Import with wrong column mapping → data ends up in wrong fields → re-import with correct mapping → works.
+4. Navigate to duplicates page → see potential duplicates identified.
+5. Merge two contacts → call history combined → secondary disappears from list.
+6. Call from a merged contact's old number → still recognized (calls re-pointed).
+7. Full JSON export (admin) → contains contacts, calls, deals, tasks.
 
 ### Blocked until answered
 
