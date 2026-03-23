@@ -37,17 +37,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   })
 
-  // If 401/403, clear stored token so user gets redirected to login.
-  // Skip redirect on /register and /login so the page can show its own error.
+  // If 401/403 on a protected endpoint, clear stored token and redirect to login.
+  // Skip for auth endpoints — they handle their own errors via the calling page.
   if (res.status === 401 || res.status === 403) {
-    const { clearToken } = await import('./auth')
-    clearToken()
-    if (
-      typeof window !== 'undefined' &&
-      !window.location.pathname.startsWith('/login') &&
-      !window.location.pathname.startsWith('/register')
-    ) {
-      window.location.href = '/login'
+    const isAuthEndpoint = path.startsWith('/api/auth/')
+    if (!isAuthEndpoint) {
+      const { clearToken } = await import('./auth')
+      clearToken()
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.pathname.startsWith('/login') &&
+        !window.location.pathname.startsWith('/register')
+      ) {
+        window.location.href = '/login'
+      }
     }
   }
 
@@ -207,5 +210,5 @@ export const api = {
   },
 
   health: () =>
-    request<{ status: string; public_url: string | null; demo_mode: boolean; services: Record<string, { status: string }> }>('/health'),
+    request<{ status: string; public_url: string | null; demo_mode: boolean; services: Record<string, { status: string }> }>('/health?detail=true'),
 }
