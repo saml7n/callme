@@ -37,12 +37,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   })
 
-  // If 401/403, clear stored token so user gets redirected to login
+  // If 401/403, clear stored token so user gets redirected to login.
+  // Skip redirect on /register and /login so the page can show its own error.
   if (res.status === 401 || res.status === 403) {
     const { clearToken } = await import('./auth')
     clearToken()
-    // Only redirect if we're in a browser context
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/login') &&
+      !window.location.pathname.startsWith('/register')
+    ) {
       window.location.href = '/login'
     }
   }

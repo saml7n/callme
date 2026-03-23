@@ -40,11 +40,16 @@ def get_demo_email() -> str:
 
 
 def get_demo_password() -> str:
-    """Return the demo password from config, auto-generating if not set."""
+    """Return the demo password from config, auto-generating if not set.
+
+    When auto-generated, the value is cached on ``app_settings`` so that
+    subsequent calls within the same process return the same password.
+    """
     if app_settings.demo_password:
         return app_settings.demo_password
     import uuid
     generated = uuid.uuid4().hex[:16]
+    app_settings.demo_password = generated
     logger.info("DEMO_PASSWORD not set — auto-generated: %s", generated)
     return generated
 

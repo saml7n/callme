@@ -70,7 +70,7 @@ async def register(
     # Gate: invite code check
     if not settings.callme_invite_code:
         raise HTTPException(status_code=403, detail="Registration is disabled")
-    if body.invite_code != settings.callme_invite_code:
+    if not secrets.compare_digest(body.invite_code, settings.callme_invite_code):
         raise HTTPException(status_code=403, detail="Invalid invite code")
 
     # Password policy
