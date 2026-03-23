@@ -179,8 +179,8 @@ class TestStartup:
             resp = await c.get("/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
-        assert "public_url" in data
+        # Story 26: default health returns minimal {"status": "ok"} only
+        assert data == {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

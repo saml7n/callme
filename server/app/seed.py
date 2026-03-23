@@ -30,9 +30,25 @@ from app.crypto import encrypt
 
 logger = logging.getLogger(__name__)
 
-DEMO_EMAIL = "demo@callme.ai"
-DEMO_PASSWORD = "demo1234"
+DEMO_EMAIL = "demo@callme.ai"  # default; overridden by DEMO_EMAIL env var
 DEMO_NAME = "Demo User"
+
+
+def get_demo_email() -> str:
+    """Return the demo email from config (env var or default)."""
+    return app_settings.demo_email or DEMO_EMAIL
+
+
+def get_demo_password() -> str:
+    """Return the demo password from config, auto-generating if not set."""
+    if app_settings.demo_password:
+        return app_settings.demo_password
+    import uuid
+    generated = uuid.uuid4().hex[:16]
+    logger.info("DEMO_PASSWORD not set — auto-generated: %s", generated)
+    return generated
+
+
 SCHEMA_DIR = Path(__file__).parent.parent / "schemas" / "examples"
 
 

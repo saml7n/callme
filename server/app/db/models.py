@@ -35,6 +35,7 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     password_hash: str = Field(default="")
     name: str = Field(default="")
+    is_admin: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

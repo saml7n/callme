@@ -11,7 +11,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.db.session as session_mod
-from app.auth import get_current_user, require_auth
+from app.auth import get_current_user, require_admin, require_auth
 import app.auth as auth_mod
 from app.db.models import Call, CallEvent, EventType, Integration, IntegrationType, PhoneNumber, User, Workflow
 from app.db.session import get_session as _original_get_session
@@ -28,7 +28,7 @@ TEST_API_KEY = "test-api-key-for-tests"
 
 # Fixed test user for API tests
 TEST_USER_ID = uuid4()
-TEST_USER = User(id=TEST_USER_ID, email="test@example.com", name="Test User", password_hash="")
+TEST_USER = User(id=TEST_USER_ID, email="test@example.com", name="Test User", password_hash="", is_admin=True)
 
 
 def _minimal_graph() -> dict[str, Any]:
@@ -97,8 +97,12 @@ def db_session() -> Generator[Session, None, None]:
     async def _no_auth() -> str:
         return TEST_API_KEY
 
-    # Return a test user for endpoints using get_current_user
+    # Return a test user for endpoints using get_current_user or require_admin
     async def _test_user() -> User:
+        return TEST_USER
+
+    # Override require_admin to return the test user (who is admin)
+    async def _test_admin() -> User:
         return TEST_USER
 
     # Monkey-patch at every import site
@@ -117,6 +121,7 @@ def db_session() -> Generator[Session, None, None]:
     app.dependency_overrides[_original_get_session] = _override
     app.dependency_overrides[require_auth] = _no_auth
     app.dependency_overrides[get_current_user] = _test_user
+    app.dependency_overrides[require_admin] = _test_admin
 
     with Session(engine) as session:
         # Create the test user in the DB so FK references work
@@ -135,5 +140,6 @@ def db_session() -> Generator[Session, None, None]:
     app.dependency_overrides.pop(_original_get_session, None)
     app.dependency_overrides.pop(require_auth, None)
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(require_admin, None)
     # Clear the admin user cache so it doesn't leak across tests
     auth_mod._admin_user_id = None

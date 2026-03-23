@@ -14,8 +14,10 @@ from app.auth import (
     get_current_user,
     hash_password,
     require_auth,
+    validate_password,
     verify_password,
 )
+from app.config import settings
 from app.db.models import User
 from app.db.session import get_session
 
@@ -30,6 +32,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     name: str = ""
+    invite_code: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -59,14 +62,26 @@ async def register(
     body: RegisterRequest,
     session: Session = Depends(get_session),
 ) -> LoginResponse:
-    """Register a new user account. Returns a JWT token."""
+    """Register a new user account. Returns a JWT token.
+
+    Requires a valid ``invite_code`` when ``CALLME_INVITE_CODE`` is set.
+    If the env var is not set, registration is disabled entirely (403).
+    """
+    # Gate: invite code check
+    if not settings.callme_invite_code:
+        raise HTTPException(status_code=403, detail="Registration is disabled")
+    if body.invite_code != settings.callme_invite_code:
+        raise HTTPException(status_code=403, detail="Invalid invite code")
+
+    # Password policy
+    password_error = validate_password(body.password)
+    if password_error:
+        raise HTTPException(status_code=422, detail=password_error)
+
     # Check for duplicate email
     existing = session.exec(select(User).where(User.email == body.email)).first()
     if existing is not None:
         raise HTTPException(status_code=409, detail="Email already registered")
-
-    if len(body.password) < 6:
-        raise HTTPException(status_code=422, detail="Password must be at least 6 characters")
 
     user = User(
         email=body.email,

@@ -10,6 +10,7 @@ export default function Register() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -21,15 +22,17 @@ export default function Register() {
     try {
       setLoading(true)
       setError(null)
-      const res = await api.auth.register(email.trim(), password, name.trim())
+      const res = await api.auth.register(email.trim(), password, name.trim(), inviteCode.trim())
       setToken(res.token)
       navigate('/setup')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registration failed'
       if (msg.includes('409')) {
         setError('An account with this email already exists')
+      } else if (msg.includes('403')) {
+        setError(msg.includes('disabled') ? 'Registration is currently disabled' : 'Invalid invite code')
       } else if (msg.includes('422')) {
-        setError('Password must be at least 6 characters')
+        setError('Password must be at least 8 characters with at least one letter and one digit')
       } else {
         setError(msg)
       }
@@ -90,12 +93,28 @@ export default function Register() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters"
+              placeholder="At least 8 characters, one letter and one digit"
               className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition"
               autoComplete="new-password"
               required
-              minLength={6}
+              minLength={8}
               data-testid="register-password"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="invite-code" className="block text-sm text-gray-400 mb-1">
+              Invite Code
+            </label>
+            <input
+              id="invite-code"
+              type="text"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="Enter your invite code"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition"
+              required
+              data-testid="register-invite-code"
             />
           </div>
 

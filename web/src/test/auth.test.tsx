@@ -182,10 +182,11 @@ describe('Register', () => {
     vi.mocked(clearToken)()
   })
 
-  it('renders the registration form', () => {
+  it('renders the registration form with invite code field', () => {
     renderRegister()
     expect(screen.getByLabelText('Email')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    expect(screen.getByLabelText('Invite Code')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument()
   })
 
@@ -201,10 +202,11 @@ describe('Register', () => {
     await user.type(screen.getByLabelText('Email'), 'new@x.com')
     await user.type(screen.getByLabelText('Name'), 'New')
     await user.type(screen.getByLabelText('Password'), 'password123')
+    await user.type(screen.getByLabelText('Invite Code'), 'welcome2026')
     await user.click(screen.getByRole('button', { name: /sign up/i }))
 
     await waitFor(() => {
-      expect(api.auth.register).toHaveBeenCalledWith('new@x.com', 'password123', 'New')
+      expect(api.auth.register).toHaveBeenCalledWith('new@x.com', 'password123', 'New', 'welcome2026')
       expect(setToken).toHaveBeenCalledWith('jwt-new-user')
       expect(screen.getByText('Setup Page')).toBeInTheDocument()
     })
@@ -219,10 +221,45 @@ describe('Register', () => {
     renderRegister()
     await user.type(screen.getByLabelText('Email'), 'dup@x.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
+    await user.type(screen.getByLabelText('Invite Code'), 'code123')
     await user.click(screen.getByRole('button', { name: /sign up/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('register-error')).toBeInTheDocument()
+    })
+  })
+
+  it('shows error for invalid invite code (403)', async () => {
+    const user = userEvent.setup()
+    ;(api.auth.register as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('403: Invalid invite code'),
+    )
+
+    renderRegister()
+    await user.type(screen.getByLabelText('Email'), 'new@x.com')
+    await user.type(screen.getByLabelText('Password'), 'password1')
+    await user.type(screen.getByLabelText('Invite Code'), 'wrong-code')
+    await user.click(screen.getByRole('button', { name: /sign up/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid invite code')).toBeInTheDocument()
+    })
+  })
+
+  it('shows error when registration is disabled (403)', async () => {
+    const user = userEvent.setup()
+    ;(api.auth.register as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('403: Registration is disabled'),
+    )
+
+    renderRegister()
+    await user.type(screen.getByLabelText('Email'), 'new@x.com')
+    await user.type(screen.getByLabelText('Password'), 'password1')
+    await user.type(screen.getByLabelText('Invite Code'), 'some-code')
+    await user.click(screen.getByRole('button', { name: /sign up/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Registration is currently disabled')).toBeInTheDocument()
     })
   })
 

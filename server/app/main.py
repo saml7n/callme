@@ -3,7 +3,7 @@ import os
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin import router as admin_router
@@ -140,22 +140,57 @@ app.include_router(platform_router)
 
 
 @app.get("/health")
-async def health_check(detail: bool = False) -> dict:
+async def health_check(
+    request: Request,
+    detail: bool = False,
+) -> dict:
     """Health endpoint.
 
-    By default returns a fast liveness response (no external calls).
-    Pass ``?detail=true`` to probe external service connectivity.
+    By default returns a minimal ``{"status": "ok"}`` liveness response
+    (no external calls, no sensitive info).
+
+    Pass ``?detail=true`` **with a valid Bearer token** to probe external
+    service connectivity and get detailed info.
     """
+    if not detail:
+        return {"status": "ok"}
+
+    # Detail mode requires authentication
+    from app.auth import decode_jwt, get_api_key
+    import secrets as _secrets
+
+    token: str = ""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:]
+
+    if not token:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Authentication required for detailed health info")
+
+    # Validate token (API key or JWT)
+    api_key = get_api_key()
+    is_valid = _secrets.compare_digest(token, api_key)
+    if not is_valid:
+        try:
+            decode_jwt(token)
+            is_valid = True
+        except Exception:
+            is_valid = False
+
+    if not is_valid:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
     demo_mode = os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes")
     result: dict = {
         "status": "ok",
         "public_url": get_public_url(),
         "demo_mode": demo_mode,
     }
-    if detail:
-        from app.health import check_all_services
-        services = await check_all_services()
-        all_ok = all(s["status"] == "ok" for s in services.values())
-        result["status"] = "ok" if all_ok else "degraded"
-        result["services"] = services
+    from app.health import check_all_services
+    services = await check_all_services()
+    all_ok = all(s["status"] == "ok" for s in services.values())
+    result["status"] = "ok" if all_ok else "degraded"
+    result["services"] = services
     return result

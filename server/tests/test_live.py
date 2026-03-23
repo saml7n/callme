@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.events import EventBus, event_bus
 from app.main import app
+from tests.conftest import TEST_API_KEY
 
 
 # =========================================================================
@@ -131,11 +132,22 @@ class TestLiveCallsREST:
 class TestLiveWebSocket:
     """Tests for the live events WebSocket."""
 
+    # WebSocket auth is done inline (not via FastAPI Depends), so we must
+    # pass a valid token as a query parameter.
+    WS_URL = f"/ws/calls/live?token={TEST_API_KEY}"
+
+    @pytest.fixture(autouse=True)
+    def _set_ws_api_key(self, monkeypatch):
+        """Ensure the API key matches our test token for WS auth."""
+        monkeypatch.setattr("app.auth._api_key", TEST_API_KEY)
+        monkeypatch.setattr("app.auth.JWT_SECRET_KEY", TEST_API_KEY)
+        monkeypatch.setattr("app.auth.settings.callme_api_key", TEST_API_KEY)
+
     def test_snapshot_on_connect(self, db_session):
         event_bus.register_call("c1", call_sid="CS1", workflow_name="W")
         try:
             client = TestClient(app)
-            with client.websocket_connect("/ws/calls/live") as ws:
+            with client.websocket_connect(self.WS_URL) as ws:
                 data = ws.receive_json()
                 assert data["type"] == "snapshot"
                 assert len(data["calls"]) == 1
@@ -145,7 +157,7 @@ class TestLiveWebSocket:
 
     def test_receives_events(self, db_session):
         client = TestClient(app)
-        with client.websocket_connect("/ws/calls/live") as ws:
+        with client.websocket_connect(self.WS_URL) as ws:
             # Consume snapshot
             ws.receive_json()
             # Emit an event
@@ -156,8 +168,8 @@ class TestLiveWebSocket:
 
     def test_multiple_clients(self, db_session):
         client = TestClient(app)
-        with client.websocket_connect("/ws/calls/live") as ws1:
-            with client.websocket_connect("/ws/calls/live") as ws2:
+        with client.websocket_connect(self.WS_URL) as ws1:
+            with client.websocket_connect(self.WS_URL) as ws2:
                 ws1.receive_json()  # snapshot
                 ws2.receive_json()  # snapshot
                 event_bus.emit({"type": "test_event", "value": 1})

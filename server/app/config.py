@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     # Auth — API key for dashboard + API access
     callme_api_key: str = ""
 
+    # Separate JWT signing secret (falls back to callme_api_key if not set)
+    jwt_secret: str = ""
+
+    # Invite code for gated registration (if empty, registration is disabled)
+    callme_invite_code: str = ""
+
+    # Configurable demo credentials (used when SEED_DEMO=true)
+    demo_email: str = "demo@callme.ai"
+    demo_password: str = ""  # auto-generated UUID if not set
+
     # Encryption key for integration credentials (Fernet / base64)
     callme_encryption_key: str = ""
 

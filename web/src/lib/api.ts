@@ -67,10 +67,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ key }),
       }),
-    register: (email: string, password: string, name: string) =>
+    register: (email: string, password: string, name: string, invite_code: string) =>
       request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email, password, name }),
+        body: JSON.stringify({ email, password, name, invite_code }),
       }),
     me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
     check: () => request<{ auth_enabled: boolean }>('/api/auth/check'),
