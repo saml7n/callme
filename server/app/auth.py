@@ -158,9 +158,20 @@ def ensure_admin_user(session: Session) -> User:
         select(User).where(User.email.in_(candidate_emails))  # type: ignore[union-attr]
     ).first()
     if existing is not None:
+        changed = False
         # Ensure is_admin is set on existing admin users
         if not existing.is_admin:
             existing.is_admin = True
+            changed = True
+        # In demo mode, keep password hash in sync with current demo password
+        # (handles auto-generated passwords that change across restarts)
+        if demo_mode:
+            from app.seed import get_demo_password
+            demo_pw = get_demo_password()
+            if not existing.password_hash or not verify_password(demo_pw, existing.password_hash):
+                existing.password_hash = hash_password(demo_pw)
+                changed = True
+        if changed:
             session.add(existing)
             session.commit()
             session.refresh(existing)
