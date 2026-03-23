@@ -127,7 +127,7 @@ def db_session() -> Generator[Session, None, None]:
         # Create the test user in the DB so FK references work
         existing = session.get(User, TEST_USER.id)
         if existing is None:
-            session.add(User(id=TEST_USER.id, email=TEST_USER.email, name=TEST_USER.name, password_hash=""))
+            session.add(User(id=TEST_USER.id, email=TEST_USER.email, name=TEST_USER.name, password_hash="", is_admin=True))
             session.commit()
         yield session
 
