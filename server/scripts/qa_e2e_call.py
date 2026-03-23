@@ -259,6 +259,7 @@ class SyntheticCaller:
         try:
             await asyncio.wait_for(self._audio_event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
+            self._collecting_greeting = False
             return 0
 
         # Wait for silence (AI stopped speaking)
