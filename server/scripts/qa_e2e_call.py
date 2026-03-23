@@ -195,7 +195,14 @@ class SyntheticCaller:
 
     Connects to the server's WebSocket, sends audio as a caller would,
     and captures + transcribes the AI's responses.
+
+    A background keepalive task continuously sends silence frames so that
+    the server's Deepgram STT connection does not timeout (net0001) while
+    the caller is "thinking" (transcribing, synthesising next utterance).
     """
+
+    # How often to send keepalive silence frames (seconds)
+    _KEEPALIVE_INTERVAL: float = 0.2  # 200ms — matches CHUNK_DURATION_MS
 
     def __init__(self) -> None:
         self._tts = ElevenLabsTTSClient()
@@ -205,6 +212,8 @@ class SyntheticCaller:
         self._seq = 0
         self._received_audio: bytearray = bytearray()
         self._receive_task: asyncio.Task | None = None
+        self._keepalive_task: asyncio.Task | None = None
+        self._keepalive_enabled = True
         self._audio_event = asyncio.Event()
         self._last_audio_time: float = 0.0
         self._greeting_audio: bytearray = bytearray()
@@ -221,8 +230,35 @@ class SyntheticCaller:
         await asyncio.sleep(0.1)
         await self._ws.send(_build_twilio_start(self._stream_sid, self._call_sid))
 
-        # Start background receiver
+        # Start background receiver and keepalive
         self._receive_task = asyncio.create_task(self._receive_loop())
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+
+    async def _keepalive_loop(self) -> None:
+        """Send silence frames to the server to keep Deepgram STT alive.
+
+        Deepgram closes the WebSocket after ~10s of no audio (net0001).
+        This loop sends silence every 200ms whenever keepalive is enabled.
+        It is paused (via _keepalive_enabled=False) while send_caller_audio
+        is actively sending real audio.
+        """
+        try:
+            while True:
+                await asyncio.sleep(self._KEEPALIVE_INTERVAL)
+                if not self._keepalive_enabled:
+                    continue
+                if self._ws is None:
+                    break
+                try:
+                    self._seq += 1
+                    silence = SILENCE_BYTE * CHUNK_SIZE
+                    await self._ws.send(
+                        _build_twilio_media(self._stream_sid, silence, self._seq)
+                    )
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
 
     async def _receive_loop(self) -> None:
         """Background loop: receive messages from the server."""
@@ -279,6 +315,9 @@ class SyntheticCaller:
         self._audio_event.clear()
         self._last_audio_time = 0.0
 
+        # Pause keepalive — we're sending real audio now
+        self._keepalive_enabled = False
+
         # Send audio in chunks (simulating real-time streaming)
         offset = 0
         while offset < len(audio):
@@ -299,6 +338,9 @@ class SyntheticCaller:
                 _build_twilio_media(self._stream_sid, silence, self._seq)
             )
             await asyncio.sleep(CHUNK_DURATION_MS / 1000)
+
+        # Resume keepalive while we wait for the AI response
+        self._keepalive_enabled = True
 
     async def wait_for_response(self, timeout: float = AI_RESPONSE_TIMEOUT) -> int:
         """Wait for the AI to respond and stop speaking. Returns audio bytes."""
@@ -365,6 +407,13 @@ class SyntheticCaller:
 
     async def disconnect(self) -> None:
         """Send stop event and close the WebSocket."""
+        self._keepalive_enabled = False
+        if self._keepalive_task is not None:
+            self._keepalive_task.cancel()
+            try:
+                await self._keepalive_task
+            except asyncio.CancelledError:
+                pass
         if self._ws is not None:
             try:
                 await self._ws.send(_build_twilio_stop(self._stream_sid))
