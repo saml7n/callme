@@ -12,14 +12,14 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.auth import require_auth
+from app.auth import require_admin
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 
 

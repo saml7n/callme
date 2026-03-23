@@ -154,14 +154,15 @@ class TestRequireAuth:
 
 class TestHealthNoAuth:
     async def test_health_no_auth_needed(self, client):
-        """GET /health works without any token."""
+        """GET /health works without any token — returns minimal response only."""
         async with client:
             resp = await client.get("/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
-        assert "public_url" in data
-        assert "demo_mode" in data
+        assert data == {"status": "ok"}
+        # Story 26: detailed info moved to ?detail=true (requires auth)
+        assert "public_url" not in data
+        assert "services" not in data
 
 
 # ---------------------------------------------------------------------------

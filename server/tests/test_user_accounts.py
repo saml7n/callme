@@ -87,19 +87,24 @@ class TestJWT:
 TEST_JWT_SECRET = "test-jwt-secret-key-for-auth-tests"
 
 
+TEST_INVITE_CODE = "test-invite-code"
+
+
 class TestRegister:
     @pytest.fixture(autouse=True)
     def _set_jwt_secret(self, monkeypatch):
         monkeypatch.setattr("app.auth.JWT_SECRET_KEY", TEST_JWT_SECRET)
+        # Story 26: registration requires invite code
+        monkeypatch.setattr("app.config.settings.callme_invite_code", TEST_INVITE_CODE)
 
     async def test_register_creates_user(self, db_session):
-        # Remove get_current_user override so register works with real DB
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             resp = await c.post("/api/auth/register", json={
                 "email": "newuser@example.com",
                 "password": "strong-password-123",
                 "name": "New User",
+                "invite_code": TEST_INVITE_CODE,
             })
         assert resp.status_code == 200
         body = resp.json()
@@ -126,14 +131,16 @@ class TestRegister:
             # First registration
             resp1 = await c.post("/api/auth/register", json={
                 "email": "dup@example.com",
-                "password": "password-123",
+                "password": "password-1abc",
+                "invite_code": TEST_INVITE_CODE,
             })
             assert resp1.status_code == 200
 
             # Duplicate
             resp2 = await c.post("/api/auth/register", json={
                 "email": "dup@example.com",
-                "password": "another-password",
+                "password": "another-pw1",
+                "invite_code": TEST_INVITE_CODE,
             })
             assert resp2.status_code == 409
 
@@ -142,7 +149,8 @@ class TestRegister:
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             resp = await c.post("/api/auth/register", json={
                 "email": "short@example.com",
-                "password": "123",  # too short
+                "password": "12a",  # too short
+                "invite_code": TEST_INVITE_CODE,
             })
             assert resp.status_code == 422
 
@@ -152,6 +160,7 @@ class TestRegister:
             resp = await c.post("/api/auth/register", json={
                 "email": "not-an-email",
                 "password": "password-123",
+                "invite_code": TEST_INVITE_CODE,
             })
             assert resp.status_code == 422
 

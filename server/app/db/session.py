@@ -80,10 +80,13 @@ def _migrate_existing_data() -> None:
                 logger.info("Adding user_id column to settings")
                 session.exec(text("ALTER TABLE settings ADD COLUMN user_id TEXT"))  # type: ignore[arg-type]
 
-        # --- 3. Create default admin user & backfill orphaned rows ---
-        if "users" in inspector.get_table_names():
-            # Refresh inspector after possible DDL changes
-            pass
+        # --- 3. Add is_admin column to users table if missing ---
+        if "users" in tables:
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            if "is_admin" not in user_cols:
+                logger.info("Adding is_admin column to users")
+                session.exec(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0"))  # type: ignore[arg-type]
+
         # Backfill happens in auth init (see app.auth.ensure_admin_user)
         session.commit()
 

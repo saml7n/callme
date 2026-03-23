@@ -42,9 +42,37 @@ async def live_events_ws(ws: WebSocket) -> None:
     The client receives JSON messages for: ``call_started``, ``transcript``,
     ``node_transition``, ``call_ended``, ``transfer_started``.
 
+    Requires a ``token`` query parameter containing a valid JWT or API key.
+    Invalid tokens are rejected with ``ws.close(code=4001)``.
+
     On connect, the server immediately sends the current active calls as
     a ``snapshot`` message so the UI can render ongoing calls.
     """
+    # Validate token before accepting the connection
+    token = ws.query_params.get("token", "")
+    if not token:
+        await ws.close(code=4001, reason="Unauthorized")
+        return
+
+    from app.auth import decode_jwt, get_api_key
+    import secrets as _secrets
+
+    # Check API key first
+    api_key = get_api_key()
+    is_valid = _secrets.compare_digest(token, api_key)
+
+    # If not API key, try JWT
+    if not is_valid:
+        try:
+            decode_jwt(token)
+            is_valid = True
+        except Exception:
+            is_valid = False
+
+    if not is_valid:
+        await ws.close(code=4001, reason="Unauthorized")
+        return
+
     await ws.accept()
     queue = event_bus.subscribe()
 

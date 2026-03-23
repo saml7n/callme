@@ -96,8 +96,16 @@ def init_api_key() -> str:
     """Initialize the API key and JWT secret. Called during app startup."""
     global _api_key, JWT_SECRET_KEY
     _api_key = _get_api_key()
-    # Use the API key as JWT signing secret (deterministic & stable across restarts)
-    JWT_SECRET_KEY = _api_key
+
+    # Prefer dedicated JWT_SECRET; fall back to API key for backward compat
+    if settings.jwt_secret:
+        JWT_SECRET_KEY = settings.jwt_secret
+    else:
+        JWT_SECRET_KEY = _api_key
+        logger.warning(
+            "JWT_SECRET not set — falling back to CALLME_API_KEY for JWT signing. "
+            "Set JWT_SECRET for production."
+        )
     return _api_key
 
 
@@ -118,8 +126,11 @@ def ensure_admin_user(session: Session) -> User:
     """Get or create the admin user used for API key auth & data backfill.
 
     When ``SEED_DEMO`` is enabled the admin user is created with a friendly
-    demo email (``demo@callme.ai`` / ``demo1234``) so that the web-UI login
-    works out of the box.  Otherwise it uses ``admin@local`` with no password.
+    demo email (configurable via ``DEMO_EMAIL`` / ``DEMO_PASSWORD``) so that
+    the web-UI login works out of the box.  Otherwise it uses ``admin@local``
+    with no password.
+
+    The admin user always has ``is_admin=True``.
     """
     import os
     from sqlmodel import select
@@ -128,29 +139,56 @@ def ensure_admin_user(session: Session) -> User:
     if _admin_user_id is not None:
         existing = session.get(User, _admin_user_id)
         if existing is not None:
+            # Ensure is_admin is always set
+            if not existing.is_admin:
+                existing.is_admin = True
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
             return existing
 
     demo_mode = os.environ.get("SEED_DEMO", "").lower() in ("true", "1", "yes")
-    admin_email = "demo@callme.ai" if demo_mode else "admin@local"
+    admin_email = settings.demo_email if demo_mode else "admin@local"
 
-    # Check both emails so we find the user regardless of mode switch
+    # Check known admin emails so we find the user regardless of mode switch
+    candidate_emails = ["admin@local", "demo@callme.ai"]
+    if settings.demo_email not in candidate_emails:
+        candidate_emails.append(settings.demo_email)
     existing = session.exec(
-        select(User).where(User.email.in_(["admin@local", "demo@callme.ai"]))  # type: ignore[union-attr]
+        select(User).where(User.email.in_(candidate_emails))  # type: ignore[union-attr]
     ).first()
     if existing is not None:
+        changed = False
+        # Ensure is_admin is set on existing admin users
+        if not existing.is_admin:
+            existing.is_admin = True
+            changed = True
+        # In demo mode, keep password hash in sync with current demo password
+        # (handles auto-generated passwords that change across restarts)
+        if demo_mode:
+            from app.seed import get_demo_password
+            demo_pw = get_demo_password()
+            if not existing.password_hash or not verify_password(demo_pw, existing.password_hash):
+                existing.password_hash = hash_password(demo_pw)
+                changed = True
+        if changed:
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
         _admin_user_id = existing.id
         return existing
 
     # Create with demo credentials when SEED_DEMO is active
     if demo_mode:
-        from app.seed import DEMO_PASSWORD, DEMO_NAME
+        from app.seed import get_demo_password, DEMO_NAME
         admin = User(
             email=admin_email,
             name=DEMO_NAME,
-            password_hash=hash_password(DEMO_PASSWORD),
+            password_hash=hash_password(get_demo_password()),
+            is_admin=True,
         )
     else:
-        admin = User(email=admin_email, name="Admin", password_hash="")
+        admin = User(email=admin_email, name="Admin", password_hash="", is_admin=True)
 
     session.add(admin)
     session.commit()
@@ -173,6 +211,24 @@ def backfill_user_ids(session: Session, admin_user_id: UUID) -> None:
         if result.rowcount:  # type: ignore[union-attr]
             logger.info("Backfilled %d rows in %s → admin user", result.rowcount, table)  # type: ignore[union-attr]
     session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Password policy
+# ---------------------------------------------------------------------------
+
+def validate_password(password: str) -> str | None:
+    """Validate password meets policy: >=8 chars, at least one letter, one digit.
+
+    Returns an error message string if invalid, or ``None`` if valid.
+    """
+    if len(password) < 8:
+        return "Password must be at least 8 characters"
+    if not any(c.isalpha() for c in password):
+        return "Password must contain at least one letter"
+    if not any(c.isdigit() for c in password):
+        return "Password must contain at least one digit"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +265,16 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
+    return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency — require the authenticated user to be an admin.
+
+    Returns the ``User`` object if admin, raises 403 otherwise.
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
 
