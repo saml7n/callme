@@ -5,7 +5,11 @@
 services:
   server:
     build: ./server
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
     environment:
       DATABASE_URL: sqlite:///./data/callme.db
       SEED_DEMO: ${SEED_DEMO:-true}

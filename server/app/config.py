@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     # Fallback transfer number for unrecoverable errors mid-call
     callme_fallback_number: str = ""
 
-    model_config = {"env_file": "../.env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ("../.env", "../.env.local"),
+        "env_file_encoding": "utf-8",
+    }
 
 
 settings = Settings()

@@ -13,8 +13,8 @@ The fastest way to get running — no Python or Node.js install required.
 ```bash
 git clone https://github.com/your-org/callme.git
 cd callme
-cp .env.example .env          # Create env file
-# Edit .env — set CALLME_API_KEY (any strong secret string)
+cp .env.example .env.local     # Create env file (gitignored)
+# Edit .env.local — set CALLME_API_KEY (any strong secret string)
 docker compose up --build     # Start server + web UI
 ```
 
@@ -117,7 +117,7 @@ fly volumes list            # Check volume
 ### 1. Environment variables
 
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 # Set CALLME_API_KEY to any strong secret (also used as admin password)
 # Optionally fill in service API keys or leave blank to enter via the UI
 ```

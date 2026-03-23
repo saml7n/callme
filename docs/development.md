@@ -29,8 +29,8 @@ This guide covers setting up a local development environment, understanding code
 ### Environment
 
 ```bash
-cp .env.example .env
-# Edit .env — at minimum set CALLME_API_KEY to any strong secret
+cp .env.example .env.local
+# Edit .env.local — at minimum set CALLME_API_KEY to any strong secret
 ```
 
 ### Server

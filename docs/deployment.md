@@ -37,7 +37,7 @@ Optional:
 ### Environment file
 
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
 At minimum, set `CALLME_API_KEY` to any strong secret string. This becomes:

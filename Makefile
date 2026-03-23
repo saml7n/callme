@@ -1,8 +1,13 @@
 .PHONY: demo dev test seed reset clean deploy
 
-# Load .env if it exists (export all vars so sub-processes inherit them)
+# Load .env and .env.local if they exist (export all vars so sub-processes
+# inherit them). .env.local overrides .env and is never committed.
 ifneq (,$(wildcard .env))
   include .env
+  export
+endif
+ifneq (,$(wildcard .env.local))
+  include .env.local
   export
 endif
 
