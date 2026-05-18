@@ -1,0 +1,22 @@
+# callme — parbaked configuration.
+#
+# Every PARBAKED_* env var also works here as a toml key.
+# Full list: https://github.com/saml7n/parbaked/blob/main/AGENTS.md
+# ──────────────────────────────────────────────────────────────────────────
+
+app_name = "callme"
+
+# Co-locate with the existing callme.db so any rows survive the migration.
+database_url = "sqlite:///./callme.db"
+
+[frontend]
+# React app lives at ./web. parbaked deploy builds it via the multi-stage
+# Dockerfile (Node build stage feeding the runtime stage) and serves the
+# dist/ output at /.
+source_dir = "web"
+build_command = "npm ci && npm run build"
+dist_subpath = "dist"
+build_image = "node:20-alpine"
+
+fly_region = "lhr"
+fly_max_machines = 2

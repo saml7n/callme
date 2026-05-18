@@ -39,3 +39,9 @@ dist/
 *.log
 .ngrok*
 .playwright-mcp/
+
+# parbaked-managed secrets (admin password, JWT signing secret).
+# Generated on first ``parbaked dev`` / ``parbaked init`` and must never
+# be checked in.
+.parbaked.json
+.parbaked/

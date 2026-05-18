@@ -1,0 +1,31 @@
+[project]
+name = "callme"
+version = "0.1.0"
+description = "CallMe — AI receptionist, built with parbaked"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "parbaked==1.3.0a4",
+    # App-specific stack (parbaked already pulls in fastapi, sqlmodel,
+    # uvicorn, pydantic, pydantic-settings, PyJWT, bcrypt, python-multipart,
+    # email-validator — those are dropped from here).
+    "twilio>=9.10.2",
+    "openai>=2.21.0",
+    "google-api-python-client>=2.190.0",
+    "google-auth>=2.48.0",
+    "google-auth-httplib2>=0.3.0",
+    "google-auth-oauthlib>=1.2.4",
+    "cryptography>=46.0.5",
+    "websockets>=16.0",
+    "httpx>=0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
