@@ -84,7 +84,7 @@ export const api = {
     // gone (admin-approval is now in parbaked's /admin UI, no more API-key
     // login, no more config-warnings panel). Keep no-op stubs so existing
     // call sites don't blow up at runtime — they're harmless.
-    loginWithKey: (_key: string) =>
+    loginWithKey: (_key: string): Promise<{ token: string; user: { id: string; email: string; name: string; status: string } }> =>
       Promise.reject(new Error('API-key login removed in the parbaked migration; use email + password.')),
     check: () => Promise.resolve({ auth_enabled: true }),
     configWarnings: () => Promise.resolve({ warnings: [] as string[] }),
@@ -211,9 +211,9 @@ export const api = {
   // migration. Stubs keep older call sites compiling; production should use
   // parbaked's /admin UI for user approval instead.
   admin: {
-    reset: () =>
+    reset: (): Promise<{ status: string; message: string }> =>
       Promise.reject(new Error('admin reset endpoint removed in the parbaked migration')),
-    seed: () =>
+    seed: (): Promise<{ status: string; message: string }> =>
       Promise.reject(new Error('admin seed endpoint removed in the parbaked migration')),
   },
 

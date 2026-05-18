@@ -45,3 +45,10 @@ dist/
 # be checked in.
 .parbaked.json
 .parbaked/
+
+# Vite output (frontend build) — generated at deploy time by the Node
+# build stage of the multi-stage Dockerfile.
+web/dist/
+
+# Local-only env file
+.env.local
