@@ -55,7 +55,7 @@ export default function LiveCalls() {
     const host = import.meta.env.VITE_API_URL
       ? new URL(import.meta.env.VITE_API_URL).host
       : window.location.host
-    const url = `${protocol}//${host}/ws/calls/live${token ? `?token=${token}` : ''}`
+    const url = `${protocol}//${host}/api/live/ws${token ? `?token=${token}` : ''}`
 
     const ws = new WebSocket(url)
     wsRef.current = ws

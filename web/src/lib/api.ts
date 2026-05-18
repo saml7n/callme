@@ -38,9 +38,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   // If 401/403 on a protected endpoint, clear stored token and redirect to login.
-  // Skip for auth endpoints — they handle their own errors via the calling page.
+  // Skip for parbaked-owned /auth/* endpoints — they handle their own errors
+  // via the calling page (e.g. inline "wrong password" UX on /login).
   if (res.status === 401 || res.status === 403) {
-    const isAuthEndpoint = path.startsWith('/api/auth/')
+    const isAuthEndpoint = path.startsWith('/auth/')
     if (!isAuthEndpoint) {
       const { clearToken } = await import('./auth')
       clearToken()
@@ -64,24 +65,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   auth: {
+    // parbaked owns /auth/* — signup creates a pending user, admin approves
+    // before login works (see /admin in the admin app). The legacy
+    // invite-code gate is gone; ``_inviteCode`` is accepted for type
+    // compatibility with old call sites but is ignored.
     login: (email: string, password: string) =>
-      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/login', {
+      request<{ token: string; user: { id: string; email: string; name: string; status: string } }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
-    loginWithKey: (key: string) =>
-      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/login', {
+    register: (email: string, password: string, name: string, _inviteCode?: string) =>
+      request<{ user_id: string; status: string; email_sent: boolean }>('/auth/signup', {
         method: 'POST',
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ email, password, name }),
       }),
-    register: (email: string, password: string, name: string, invite_code: string) =>
-      request<{ ok: boolean; token: string; user: { id: string; email: string; name: string } | null }>('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ email, password, name, invite_code }),
-      }),
-    me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
-    check: () => request<{ auth_enabled: boolean }>('/api/auth/check'),
-    configWarnings: () => request<{ warnings: string[] }>('/api/auth/config-warnings'),
+    me: () => request<{ id: string; email: string; name: string }>('/auth/me'),
+    // Legacy compatibility shims for the pre-parbaked UI. These features are
+    // gone (admin-approval is now in parbaked's /admin UI, no more API-key
+    // login, no more config-warnings panel). Keep no-op stubs so existing
+    // call sites don't blow up at runtime — they're harmless.
+    loginWithKey: (_key: string) =>
+      Promise.reject(new Error('API-key login removed in the parbaked migration; use email + password.')),
+    check: () => Promise.resolve({ auth_enabled: true }),
+    configWarnings: () => Promise.resolve({ warnings: [] as string[] }),
   },
 
   workflows: {
@@ -130,7 +136,7 @@ export const api = {
     liveCount: () => request<{ count: number }>('/api/calls/live/count'),
 
     transfer: (id: string) =>
-      request<TransferResult>(`/api/calls/${id}/transfer`, { method: 'POST' }),
+      request<TransferResult>(`/api/live/${id}/transfer`, { method: 'POST' }),
   },
 
   phoneNumbers: {
@@ -201,12 +207,14 @@ export const api = {
     status: () => request<PlatformStatus>('/api/platform/status'),
   },
 
+  // Legacy admin endpoints (demo reset / seed) were removed in the parbaked
+  // migration. Stubs keep older call sites compiling; production should use
+  // parbaked's /admin UI for user approval instead.
   admin: {
     reset: () =>
-      request<{ status: string; message: string }>('/api/admin/reset', { method: 'POST' }),
-
+      Promise.reject(new Error('admin reset endpoint removed in the parbaked migration')),
     seed: () =>
-      request<{ status: string; message: string }>('/api/admin/seed', { method: 'POST' }),
+      Promise.reject(new Error('admin seed endpoint removed in the parbaked migration')),
   },
 
   health: () =>

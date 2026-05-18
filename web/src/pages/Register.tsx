@@ -4,7 +4,6 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
-import { setToken } from '@/lib/auth'
 
 export default function Register() {
   const [email, setEmail] = useState('')
@@ -22,9 +21,11 @@ export default function Register() {
     try {
       setLoading(true)
       setError(null)
-      const res = await api.auth.register(email.trim(), password, name.trim(), inviteCode.trim())
-      setToken(res.token)
-      navigate('/setup')
+      // parbaked's /auth/signup creates a pending user — the admin must
+      // approve before login works. No token is returned. Send the user
+      // to /login with a "pending approval" notice.
+      await api.auth.register(email.trim(), password, name.trim(), inviteCode.trim())
+      navigate('/login?pending=1')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registration failed'
       if (msg.includes('409')) {
